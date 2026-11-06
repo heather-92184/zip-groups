@@ -6,7 +6,6 @@ import { useState, useMemo, useEffect, useRef } from "react";
 // --- FIREBASE IMPORTS ---
 import { db } from "../lib/firebase";
 import { collection, addDoc, onSnapshot, query, orderBy, doc, setDoc, getDoc, deleteDoc, where } from "firebase/firestore";
-import { getDatabase, ref, onDisconnect, set, serverTimestamp, onValue } from "firebase/database";
 
 interface ChatMessage {
   id: number;
@@ -26,6 +25,9 @@ interface ChecklistItem {
 
 interface GroupEvent {
   id: string;
+  groupId?: string;
+  zipCode?: string;
+  groupName?: string;
   title?: string;
   description?: string;
   text: string;
@@ -36,6 +38,8 @@ interface GroupEvent {
   venuePerk?: string;
   checklist?: ChecklistItem[];
   expirationDate?: string;
+  isAdultOnly?: boolean;
+  rsvps?: string[];
 }
 
 interface CommunityGroup {
@@ -78,6 +82,9 @@ interface ZipFriend {
   phone?: string;
   showEmailPublic?: boolean;
   showPhonePublic?: boolean;
+  discordInviteUrl?: string;
+  discordLinked?: boolean;
+  showDiscordOnCard?: boolean;
 }
 
 interface GalleryPhoto {
@@ -88,6 +95,7 @@ interface GalleryPhoto {
   caption: string;
   uploadedBy: string;
   date: string;
+  timestamp?: number;
 }
 
 interface LocalVenuePartner {
@@ -106,6 +114,7 @@ interface Review {
   rating: number;
   text: string;
   date: string;
+  timestamp?: number;
 }
 
 interface ShopItem {
@@ -127,6 +136,61 @@ interface CartItem extends ShopItem {
   quantity: number;
 }
 
+// --- IMAGE COMPRESSION HELPER FOR CLOUD STORAGE ---
+// Resizes device photos so they stay well under Firestore's 1MB limit and sync across all devices
+const compressImageFile = (file: File, maxWidth = 500, maxHeight = 500, quality = 0.8): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(event.target?.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = (err) => reject(err);
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+};
+
+// --- SAFE DISCORD URL NORMALIZER ---
+const formatDiscordHref = (rawUrl?: string) => {
+  if (!rawUrl) return "#";
+  const trimmed = rawUrl.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return `https://discord.com/users/${trimmed}`;
+  }
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  return `https://${trimmed.replace(/^\/+/, "")}`;
+};
+
 // --- SHOP PRODUCTS CATALOG ---
 const SHOP_ITEMS: ShopItem[] = [
   { id: "s-host", name: "Zip Host Membership ($15/mo)", price: 15, category: "Host Gear", images: ["/zip-host-logo.png"], description: "Unlock unlimited event broadcasting, verified host badge, and earn your physical Host Welcome Kit FREE after 3 active months!", isHostMembership: true },
@@ -145,6 +209,7 @@ const SHOP_ITEMS: ShopItem[] = [
   { id: "s12", name: "Community Clipboard", price: 8, category: "Accessories", images: ["/clipboard.png"], description: "Sturdy clipboard for event check-ins and sign-ups." },
   { id: "s13", name: "Insulated Wine Tumbler", price: 12, category: "Drinkware", images: ["/wine-tumblers.png"], description: "Stainless steel tumbler for outdoor socials." },
 ];
+
 const DESIGNS = [
   "Zip Groups (Standard)",
   "Zip Groups (Personalized)",
@@ -165,18 +230,14 @@ const MOCK_PARTNER_VENUES: LocalVenuePartner[] = [
   { id: "v4", name: "Metro Park Pavilion #3", type: "Public Park & Trails", perk: "Free public grill access & group reservation", zipCode: "43230", address: "Inniswood Metro Gardens", imageBg: "bg-emerald-900" },
 ];
 
-const INITIAL_PHOTOS: GalleryPhoto[] = [
-  { id: "p1", groupId: "1", groupName: "Men's Circle", imageUrl: "https://images.unsplash.com/photo-1511632765486-a01980e01a18?auto=format&fit=crop&w=800&q=80", caption: "Poker night champions!", uploadedBy: "Dave_B", date: "8/01/26" },
-  { id: "p2", groupId: "5", groupName: "Parks/Hiking", imageUrl: "https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=800&q=80", caption: "Inniswood trails look amazing today. Perfect weather.", uploadedBy: "TrailHiker", date: "7/28/26" },
-  { id: "p3", groupId: "2", groupName: "Women's Circle", imageUrl: "https://images.unsplash.com/photo-1528605248644-14dd04022da1?auto=format&fit=crop&w=800&q=80", caption: "Sunday brunch spread 🥂", uploadedBy: "Sarah L.", date: "8/02/26" },
-];
+const INITIAL_PHOTOS: GalleryPhoto[] = [];
 
 const ZIP_BOT_FRIEND: ZipFriend = { 
   id: "f-zipbot", 
   name: "Zip Bot", 
   handle: "@zipbot_faq", 
   status: "Online", 
-  mutualGroups: 42, 
+  mutualGroups: 0, 
   avatarColor: "bg-gradient-to-tr from-cyan-600 to-emerald-600", 
   avatarInitials: "ZB", 
   hostedCount: 0, 
@@ -189,41 +250,9 @@ const ZIP_BOT_FRIEND: ZipFriend = {
   cardThemeGradient: "from-cyan-950 via-gray-900 to-black"
 };
 
-const HEATHER_FRIEND: ZipFriend = {
-  id: "f-heather",
-  name: "Heather",
-  handle: "@heather",
-  status: "Online",
-  mutualGroups: 42,
-  avatarUrl: "/heather-avatar.jpeg",
-  cardBannerUrl: "/heather-banner.jpeg",
-  avatarColor: "bg-purple-600",
-  avatarInitials: "H",
-  hostedCount: 2,
-  streak: 99,
-  stellarRating: 5.0,
-  stellarReviews: 350,
-  isBot: false,
-  isDefault: true,
-  titleBadge: "Zip Groups Creator",
-  cardThemeGradient: "from-purple-950 via-indigo-950 to-black"
-};
-
-
-const INITIAL_REVIEWS: Review[] = [
-  { id: "r1", userName: "Sarah L.", rating: 5, text: "The Frugal Living group helped me save $400 this month! So many great local tips.", date: "7/20/26" },
-  { id: "r2", userName: "Dave B.", rating: 5, text: "Found my new D&D campaign through the tabletop group. Best Friday nights ever!", date: "7/22/26" },
-  { id: "r3", userName: "Elena R.", rating: 5, text: "The Women's Circle feels like the village I've been looking for since moving here.", date: "7/25/26" },
-];
+const INITIAL_REVIEWS: Review[] = [];
 
 const FULL_EMOJI_LIST = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😋", "😛", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🤩", "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔", "🤭", "🤫", "🤥", "😶", "😐", "😑", "😬", "🙄", "😯", "😦", "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😵", "🤐", "🥴", "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👹", "👺", "🤡", "💩", "👻", "💀", "👽", "👾", "🤖", "🎃", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾", "👋", "🤚", "🖐️", "✋", "🖖", "👌", "🤌", "🤏", "✌️", "🤞", "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝️", "👍", "👎", "✊", "👊", "🤛", "🤜", "👏", "🙌", "👐", "🤲", "🤝", "🙏", "✍️", "💅", "🤳", "💪", "🦾", "🦿", "🦵", "🦶", "👂", "🦻", "👃", "🧠", "🫀", "🫁", "🦷", "🦴", "👀", "👁️", "👅", "👄", "💋", "👑", "🔥", "🍷", "🃏", "🍺", "☕", "🎉", "⭐", "🚗", "🚶"];
-
-const GIF_PRESETS = [
-  { title: "Party Time (Giphy)", url: "https://media.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif" },
-  { title: "Mind Blown (Tenor)", url: "https://media1.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif" },
-  { title: "Let's Go (Giphy)", url: "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif" },
-  { title: "High Five (Tenor)", url: "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif" },
-];
 
 const CARD_GRADIENT_PRESETS = [
   { name: "Cyan Spark", class: "from-cyan-900 via-gray-900 to-black" },
@@ -257,16 +286,14 @@ const HOST_HQ_GROUP: CommunityGroup = {
   name: "Zip Hosts Connect",
   category: "Support",
   location: "National Host Portal",
-  members: 342,
+  members: 0,
   description: "Exclusive portal for verified Zip Hosts to share tips, coordinate multi-zip events, and get direct support from the core team.",
   events: [],
   icon: "👑",
   color: "border-amber-500/40 text-amber-400 bg-amber-950/80",
   glow: "shadow-[0_0_15px_rgba(245,158,11,0.35)]",
   isHostOnly: true,
-  chatMessages: [
-     { id: 1, user: "Admin_Thomas", isHost: true, time: "10:00", timestamp: Date.now() - 3600000, text: "Welcome to the new Host HQ! Drop your best potluck tips and venue recommendations below.", color: "text-amber-400" }
-  ]
+  chatMessages: []
 };
 
 const isChatActiveWithin2Mins = (messages: ChatMessage[]) => {
@@ -283,6 +310,7 @@ const getValidEvents = (events: (string | GroupEvent)[]) => {
   });
 };
 
+// Generates the 30 standard neighborhood categories for any zip code with 0 fake members and 0 fake events
 const generateGroupsForZip = (zip: string): CommunityGroup[] => {
   const templates = [
     { name: "Men's Circle", category: "Social", icon: "🃏", colorIdx: 3, desc: "Neighborhood hangouts, BYOB and chill, backyard pool parties, and card game nights." },
@@ -325,26 +353,13 @@ const generateGroupsForZip = (zip: string): CommunityGroup[] => {
       name: item.name,
       category: item.category,
       location: `Zip Code ${zip} Area`,
-      members: 25 + ((idx * 7) % 35),
+      members: 0,
       description: item.desc,
-      events: [
-        {
-          id: `e-${zip}-${idx + 1}`,
-          title: `${item.name} Get-Together`,
-          description: `Gathering for ${item.name.toLowerCase()} in ${zip}. All neighbors welcome!`,
-          text: `${item.name} Get-Together (8/15/26 @ 6PM)`,
-          color: theme.class,
-          host: "System",
-          locationName: `Local Partner Venue in ${zip}`,
-          expirationDate: "2026-08-16T00:00:00"
-        }
-      ],
+      events: [],
       icon: item.icon,
       color: theme.class,
       glow: theme.glow,
-      chatMessages: [
-        { id: 1, user: "LocalHost", isHost: true, time: "12:00", timestamp: Date.now() - 3600000, text: `Welcome to the active ${item.name} group in ${zip}! Say hi!`, color: "text-cyan-400" }
-      ]
+      chatMessages: []
     };
   });
 };
@@ -444,74 +459,14 @@ function ProductCard({ product, onAddToCart, onOpenSub }: { product: ShopItem; o
   );
 }
 
-// --- UNIVERSAL NATIONWIDE ZIP RADIUS ENGINE ---
-interface GeoCoord {
-  lat: number;
-  lng: number;
-}
-
-const EARTH_RADIUS_MILES = 3958.8;
-
-function calculateDistanceMiles(coord1: GeoCoord, coord2: GeoCoord): number {
-  const dLat = ((coord2.lat - coord1.lat) * Math.PI) / 180;
-  const dLng = ((coord2.lng - coord1.lng) * Math.PI) / 180;
-  const lat1 = (coord1.lat * Math.PI) / 180;
-  const lat2 = (coord2.lat * Math.PI) / 180;
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return EARTH_RADIUS_MILES * c;
-}
-
-const ZIP_PREFIX_CENTROIDS: Record<string, GeoCoord> = {
-  "010": { lat: 42.27, lng: -72.63 },
-  "021": { lat: 42.36, lng: -71.06 },
-  "070": { lat: 40.75, lng: -74.17 },
-  "080": { lat: 39.85, lng: -74.96 },
-  "100": { lat: 40.78, lng: -73.97 },
-  "112": { lat: 40.65, lng: -73.95 },
-  "142": { lat: 42.89, lng: -78.88 },
-  "200": { lat: 38.91, lng: -77.02 },
-  "282": { lat: 35.23, lng: -80.84 },
-  "303": { lat: 33.75, lng: -84.39 },
-  "331": { lat: 25.76, lng: -80.19 },
-  "372": { lat: 36.16, lng: -86.78 },
-  "430": { lat: 40.09, lng: -82.91 },
-  "431": { lat: 39.82, lng: -82.98 },
-  "432": { lat: 39.96, lng: -83.00 },
-  "441": { lat: 41.50, lng: -81.69 },
-  "452": { lat: 39.10, lng: -84.51 },
-  "482": { lat: 42.33, lng: -83.05 },
-  "554": { lat: 44.98, lng: -93.27 },
-  "606": { lat: 41.88, lng: -87.63 },
-  "701": { lat: 29.95, lng: -90.07 },
-  "752": { lat: 32.78, lng: -96.80 },
-  "770": { lat: 29.76, lng: -95.37 },
-  "787": { lat: 30.27, lng: -97.74 },
-  "802": { lat: 39.74, lng: -104.99 },
-  "850": { lat: 33.45, lng: -112.07 },
-  "891": { lat: 36.17, lng: -115.14 },
-  "900": { lat: 34.05, lng: -118.24 },
-  "941": { lat: 37.77, lng: -122.42 },
-  "972": { lat: 45.52, lng: -122.68 },
-  "981": { lat: 47.61, lng: -122.33 },
-};
-
-function getCoordinatesForZip(zip: string): GeoCoord | null {
-  const clean = zip.trim().slice(0, 5);
-  if (clean.length < 3) return null;
-  const prefix = clean.slice(0, 3);
-  return ZIP_PREFIX_CENTROIDS[prefix] || null;
-}
 export default function Home() {
   // ==========================================
   // 1. ALL COMPONENT STATE DECLARATIONS
   // ==========================================
   const [groups, setGroups] = useState<CommunityGroup[]>(() => [HOST_HQ_GROUP, ...generateGroupsForZip("43230")]);
-  
+  const [allCloudUsers, setAllCloudUsers] = useState<Record<string, any>[]>([]);
+  const [cloudEvents, setCloudEvents] = useState<GroupEvent[]>([]);
+
   // View & Modal States
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isHostOpen, setIsHostOpen] = useState(false);
@@ -536,6 +491,28 @@ export default function Home() {
   const [isVenuesView, setIsVenuesView] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<CommunityGroup | null>(null);
   const [activeGroupMembers, setActiveGroupMembers] = useState<any[]>([]);
+  const [activeLegalModal, setActiveLegalModal] = useState<null | "terms" | "privacy" | "guidelines" | "disclaimer">(null);
+
+  // Email Verification & Password Reset States
+  const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
+  const [verificationCodeSent, setVerificationCodeSent] = useState("");
+  const [verificationCodeInput, setVerificationCodeInput] = useState("");
+  const [isSendingCode, setIsSendingCode] = useState(false);
+
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetUsernameInput, setResetUsernameInput] = useState("");
+  const [resetEmailInput, setResetEmailInput] = useState("");
+  const [resetCodeSent, setResetCodeSent] = useState("");
+  const [resetCodeInput, setResetCodeInput] = useState("");
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetStep, setResetStep] = useState<"request" | "verify">("request");
+  const [showResetPassword, setShowResetPassword] = useState(false);
+
+  // Password Show/Hide States
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   // Shop & Cart States
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -553,11 +530,13 @@ export default function Home() {
   const [discordLinked, setDiscordLinked] = useState(false);
   const [showDiscordOnCard, setShowDiscordOnCard] = useState(true);
 
-  // Safety Check-In Wizard States
+  // Safety Check-In Wizard & Real Timer States
   const [safetyActive, setSafetyActive] = useState(false);
   const [safetyStep, setSafetyStep] = useState<"time" | "atEvent" | "interval" | "active">("time");
   const [safetyEventTime, setSafetyEventTime] = useState("18:00");
   const [safetyIntervalHours, setSafetyIntervalHours] = useState(2);
+  const [safetyPromptDue, setSafetyPromptDue] = useState(false);
+  const [safetyGraceSeconds, setSafetyGraceSeconds] = useState(600);
 
   // Report chat form state
   const [reportNames, setReportNames] = useState("");
@@ -612,13 +591,13 @@ export default function Home() {
   // Password management states
   const [currentPasswordInput, setCurrentPasswordInput] = useState("");
   const [newPasswordInput, setNewPasswordInput] = useState("");
-  const [storedPassword, setStoredPassword] = useState("secret123");
+  const [storedPassword, setStoredPassword] = useState("");
   const [isLoginMode, setIsLoginMode] = useState(false);
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [userStatus, setUserStatus] = useState<"Online" | "Busy" | "Show Offline" | "At an event">("Online");
-  const [userAge, setUserAge] = useState<string>("28");
-  const [userGender, setUserGender] = useState<string>("Female");
+  const [userAge, setUserAge] = useState<string>("");
+  const [userGender, setUserGender] = useState<string>("");
   const [showAgePublic, setShowAgePublic] = useState(true);
   const [showGenderPublic, setShowGenderPublic] = useState(true);
   const [emergencyContactName, setEmergencyContactName] = useState("");
@@ -627,8 +606,11 @@ export default function Home() {
   const [emergencyContactEmail, setEmergencyContactEmail] = useState("");
   const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(null);
   const [userCardBannerUrl, setUserCardBannerUrl] = useState<string | null>(null);
-  const [userCardThemeGradient, setUserCardThemeGradient] = useState<string>("from-purple-900 via-indigo-950 to-black");
+  const [userCardThemeGradient, setUserCardThemeGradient] = useState<string>("from-purple-950 via-indigo-950 to-black");
   const [userHostedEvents, setUserHostedEvents] = useState(0); 
+  const [userStreak, setUserStreak] = useState(0);
+  const [userStellarRating, setUserStellarRating] = useState(0);
+  const [userStellarReviews, setUserStellarReviews] = useState(0);
   const [isSubscribedHost, setIsSubscribedHost] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 
@@ -645,12 +627,11 @@ export default function Home() {
   const [partnerPerk, setPartnerPerk] = useState("");
   const [partnerMenu, setPartnerMenu] = useState("");
 
-  // Reviews State
+  // Reviews & Gallery States (Cloud Synced)
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewText, setReviewText] = useState("");
 
-  // Gallery Upload States
   const [photos, setPhotos] = useState<GalleryPhoto[]>(INITIAL_PHOTOS);
   const [uploadGroup, setUploadGroup] = useState("");
   const [uploadCaption, setUploadCaption] = useState("");
@@ -682,7 +663,7 @@ export default function Home() {
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
   // ==========================================
-  // 3. USE MEMO DECLARATIONS & DERIVED STATE
+  // 3. USE MEMO DECLARATIONS & DERIVED CLOUD STATE
   // ==========================================
   const userInitials = useMemo(() => {
     if (!userName) return "US";
@@ -691,96 +672,37 @@ export default function Home() {
     return userName.slice(0, 2).toUpperCase();
   }, [userName]);
 
-  // Load saved Profile & Account Settings from localStorage on page load/refresh
-  useEffect(() => {
-    try {
-      const savedData = localStorage.getItem("zipgroups_user_settings_v1");
-      if (savedData) {
-        const parsed = JSON.parse(savedData);
-        if (parsed.isLoggedIn !== undefined) setIsLoggedIn(parsed.isLoggedIn);
-        if (parsed.userName) setUserName(parsed.userName);
-        if (parsed.userEmail) setUserEmail(parsed.userEmail);
-        if (parsed.userPhone) setUserPhone(parsed.userPhone);
-        if (parsed.showEmailPublic !== undefined) setShowEmailPublic(parsed.showEmailPublic);
-        if (parsed.showPhonePublic !== undefined) setShowPhonePublic(parsed.showPhonePublic);
-        if (parsed.userStatus) setUserStatus(parsed.userStatus);
-        if (parsed.userAge) setUserAge(parsed.userAge);
-        if (parsed.userGender) setUserGender(parsed.userGender);
-        if (parsed.showAgePublic !== undefined) setShowAgePublic(parsed.showAgePublic);
-        if (parsed.showGenderPublic !== undefined) setShowGenderPublic(parsed.showGenderPublic);
-        if (parsed.emergencyContactName) setEmergencyContactName(parsed.emergencyContactName);
-        if (parsed.emergencyContactPhone) setEmergencyContactPhone(parsed.emergencyContactPhone);
-        if (parsed.emergencyContactCarrier) setEmergencyContactCarrier(parsed.emergencyContactCarrier);
-        if (parsed.emergencyContactEmail) setEmergencyContactEmail(parsed.emergencyContactEmail);
-        if (parsed.userAvatarUrl) setUserAvatarUrl(parsed.userAvatarUrl);
-        if (parsed.userCardBannerUrl) setUserCardBannerUrl(parsed.userCardBannerUrl);
-        if (parsed.userCardThemeGradient) setUserCardThemeGradient(parsed.userCardThemeGradient);
-        if (parsed.shippingAddress) setShippingAddress(parsed.shippingAddress);
-        if (parsed.discordInviteUrl) setDiscordInviteUrl(parsed.discordInviteUrl);
-        if (parsed.discordLinked !== undefined) setDiscordLinked(parsed.discordLinked);
-        if (parsed.showDiscordOnCard !== undefined) setShowDiscordOnCard(parsed.showDiscordOnCard);
-        if (parsed.savedZips && Array.isArray(parsed.savedZips)) setSavedZips(parsed.savedZips);
+  // Compute REAL member counts for every group ID from Firestore users
+  const groupMemberCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allCloudUsers.forEach(u => {
+      if (Array.isArray(u.joinedGroups)) {
+        u.joinedGroups.forEach((gId: string) => {
+          counts[gId] = (counts[gId] || 0) + 1;
+        });
       }
-    } catch (err) {
-      console.error("Error loading saved profile settings:", err);
-    }
-  }, []);
+    });
+    return counts;
+  }, [allCloudUsers]);
 
-  // Automatically persist Profile & Account Settings whenever they are updated
-  useEffect(() => {
-    if (!userName && !userEmail && !isLoggedIn) return;
-    try {
-      const settingsToSave = {
-        isLoggedIn,
-        userName,
-        userEmail,
-        userPhone,
-        showEmailPublic,
-        showPhonePublic,
-        userStatus,
-        userAge,
-        userGender,
-        showAgePublic,
-        showGenderPublic,
-        emergencyContactName,
-        emergencyContactPhone,
-        emergencyContactCarrier,
-        emergencyContactEmail,
-        userAvatarUrl,
-        userCardBannerUrl,
-        userCardThemeGradient,
-        shippingAddress,
-        discordInviteUrl,
-        discordLinked,
-        showDiscordOnCard,
-        savedZips,
-      };
-      localStorage.setItem("zipgroups_user_settings_v1", JSON.stringify(settingsToSave));
-    } catch (err) {
-      console.error("Error saving profile settings:", err);
-    }
-  }, [
-    isLoggedIn, userName, userEmail, userPhone, showEmailPublic, showPhonePublic,
-    userStatus, userAge, userGender, showAgePublic, showGenderPublic,
-    emergencyContactName, emergencyContactPhone, emergencyContactCarrier, emergencyContactEmail,
-    userAvatarUrl, userCardBannerUrl, userCardThemeGradient, shippingAddress,
-    discordInviteUrl, discordLinked, showDiscordOnCard, savedZips
-  ]);
+  // Compute REAL Top 3 Community Hosts from Firestore users
+  const topCommunityHosts = useMemo(() => {
+    const hosts = [...allCloudUsers]
+      .filter(u => (u.hostedCount || 0) > 0)
+      .sort((a, b) => (b.hostedCount || 0) - (a.hostedCount || 0))
+      .slice(0, 3);
+    return hosts;
+  }, [allCloudUsers]);
 
   const filteredGroups = useMemo(() => {
     if (!hasSearched) return [];
     const targetZip = (zipCode.trim() || "43230");
 
-    // 1. Determine how many surrounding zip chapters to show based on the radius slider
-    // 5 miles = 1 zip | 10 miles = 3 zips | 15 miles = 5 zips | 20 miles = 7 zips | 25 miles = 9 zips
     const numZipsToShow = radius <= 5 ? 1 : Math.min(10, Math.floor(radius / 3) + 1);
-
-    // 2. Build the list of nearby zip codes for this radius
     let radiusZips: string[] = [targetZip];
 
     if (numZipsToShow > 1) {
       const prefix = targetZip.slice(0, 3);
-      // Real regional zip pools by 3-digit prefix (starting with Central Ohio + universal US formula)
       const regionalPools: Record<string, string[]> = {
         "432": ["43222", "43223", "43215", "43204", "43212", "43201", "43206", "43214", "43221", "43229", "43230", "43228", "43220", "43235"],
         "430": ["43081", "43085", "43026", "43016", "43017", "43068", "43054", "43065", "43015", "43040", "43230", "43229"],
@@ -791,12 +713,11 @@ export default function Home() {
         const others = regionalPools[prefix].filter(z => z !== targetZip);
         radiusZips = [targetZip, ...others.slice(0, numZipsToShow - 1)];
       } else {
-        // Universal Nationwide Generator: creates valid neighboring 5-digit zips within the same 3-digit SCF postal district
         const baseTail = parseInt(targetZip.slice(3, 5), 10) || 10;
         const offsets = [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6];
         for (const off of offsets) {
           if (radiusZips.length >= numZipsToShow) break;
-          const nextTail = ((baseTail + off + 99) % 98) + 1; // Keeps tail between 01 and 99 inside the same state/city prefix
+          const nextTail = ((baseTail + off + 99) % 98) + 1;
           const candidateZip = `${prefix}${String(nextTail).padStart(2, "0")}`;
           if (!radiusZips.includes(candidateZip)) {
             radiusZips.push(candidateZip);
@@ -805,19 +726,24 @@ export default function Home() {
       }
     }
 
-    // 3. For every zip code in the radius, pull existing groups OR dynamically generate its chapters!
     const allRadiusGroups: CommunityGroup[] = [];
     radiusZips.forEach(z => {
       const existing = groups.filter(g => g.zipCode === z && !g.isHostOnly);
-      if (existing.length > 0) {
-        allRadiusGroups.push(...existing);
-      } else {
-        allRadiusGroups.push(...generateGroupsForZip(z));
-      }
+      const baseList = existing.length > 0 ? existing : generateGroupsForZip(z);
+      baseList.forEach(g => {
+        const matchingCloudEvents = cloudEvents.filter(
+          ev => ev.groupId === g.id || (ev.zipCode === g.zipCode && ev.groupName?.toLowerCase() === g.name.toLowerCase())
+        );
+        allRadiusGroups.push({
+          ...g,
+          members: groupMemberCounts[g.id] || 0,
+          events: matchingCloudEvents
+        });
+      });
     });
 
     return allRadiusGroups;
-  }, [hasSearched, zipCode, radius, groups]);
+  }, [hasSearched, zipCode, radius, groups, groupMemberCounts, cloudEvents]);
 
   const stackedGroups = useMemo(() => {
     if (!hasSearched) return [];
@@ -830,19 +756,51 @@ export default function Home() {
   }, [hasSearched, filteredGroups]);
 
   const uniqueGroupNames = Array.from(new Set(groups.filter(g => !g.isHostOnly).map(g => g.name)));
-  const totalGroupsCount = groups.filter(g => !g.isHostOnly).length;
-  const totalMembersCount = groups.filter(g => !g.isHostOnly).reduce((acc, g) => acc + g.members, 1250);
+  const totalGroupsCount = 30;
+  const totalMembersCount = allCloudUsers.length;
   
   const topReviews = useMemo(() => {
-    return reviews.filter(r => r.rating >= 4);
+    return reviews.filter(r => r.rating >= 4).slice(0, 3);
   }, [reviews]);
 
   const isJoined = selectedGroup ? joinedGroups.has(selectedGroup.id) : false;
   const isFavorited = selectedGroup ? favorites.has(selectedGroup.id) : false;
 
+  // Live events for currently selected group
+  const activeGroupEvents = useMemo(() => {
+    if (!selectedGroup) return [];
+    const fromCloud = cloudEvents.filter(
+      ev => ev.groupId === selectedGroup.id || (ev.zipCode === selectedGroup.zipCode && ev.groupName?.toLowerCase() === selectedGroup.name.toLowerCase())
+    );
+    return getValidEvents(fromCloud);
+  }, [selectedGroup, cloudEvents]);
+
   // ==========================================
   // 4. HELPER FUNCTIONS
   // ==========================================
+  const wipeLocalStateAndLogout = () => {
+    localStorage.removeItem("zipgroups_user_settings_v1");
+    localStorage.removeItem("zip_user_name");
+    localStorage.removeItem("zip_is_logged_in");
+    setIsLoggedIn(false);
+    setUserName("");
+    setUserEmail("");
+    setUserPhone("");
+    setUserAvatarUrl(null);
+    setUserCardBannerUrl(null);
+    setDiscordInviteUrl("");
+    setDiscordLinked(false);
+    setEmergencyContactName("");
+    setEmergencyContactPhone("");
+    setEmergencyContactEmail("");
+    setJoinedGroups(new Set());
+    setFavorites(new Set());
+    setSavedZips([]);
+    setIsProfileOpen(false);
+    setIsAccountSettingsOpen(false);
+    window.location.href = "/";
+  };
+
   const handleReset = () => {
     setHasSearched(false);
     setSelectedGroup(null);
@@ -858,30 +816,26 @@ export default function Home() {
   };
 
   function calculateAgeCategory(birthdayStr: string): string {
-  if (!birthdayStr || !birthdayStr.trim()) return "Adult 18+";
-  
-  const cleanStr = birthdayStr.trim();
-  const birthDate = new Date(cleanStr);
-  
-  // Fallback if user typed only a 4-digit year or non-standard format
-  if (isNaN(birthDate.getTime())) {
-    const yearMatch = cleanStr.match(/\b(19\d\d|20\d\d)\b/);
-    if (yearMatch) {
-      const birthYear = parseInt(yearMatch[1], 10);
-      const approxAge = new Date().getFullYear() - birthYear;
-      return approxAge >= 18 ? "Adult 18+" : "Teen 13+";
+    if (!birthdayStr || !birthdayStr.trim()) return "Adult 18+";
+    const cleanStr = birthdayStr.trim();
+    const birthDate = new Date(cleanStr);
+    if (isNaN(birthDate.getTime())) {
+      const yearMatch = cleanStr.match(/\b(19\d\d|20\d\d)\b/);
+      if (yearMatch) {
+        const birthYear = parseInt(yearMatch[1], 10);
+        const approxAge = new Date().getFullYear() - birthYear;
+        return approxAge >= 18 ? "Adult 18+" : "Teen 13+";
+      }
+      return "Adult 18+";
     }
-    return "Adult 18+";
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age >= 18 ? "Adult 18+" : "Teen 13+";
   }
-
-  const today = new Date();
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const m = today.getMonth() - birthDate.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-    age--;
-  }
-  return age >= 18 ? "Adult 18+" : "Teen 13+";
-}
 
   const requireAuth = (action: () => void) => {
     if (!isLoggedIn) {
@@ -894,7 +848,7 @@ export default function Home() {
 
   const requireHostSubscription = (action: () => void) => {
     requireAuth(() => {
-      if (!isSubscribedHost && userHostedEvents === 0) {
+      if (!isSubscribedHost && userHostedEvents === 0 && userName.toLowerCase() !== "heather") {
         setPendingAction(() => action);
         setIsManageSubOpen(true);
         return;
@@ -904,116 +858,170 @@ export default function Home() {
   };
 
   // ==========================================
-  // 5. USE EFFECT HOOKS
+  // 5. CLOUD SYNC USE EFFECT HOOKS
   // ==========================================
   useEffect(() => {
     if (notification) {
-      const timer = setTimeout(() => setNotification(null), 10000);
+      const timer = setTimeout(() => setNotification(null), 8000);
       return () => clearTimeout(timer);
     }
   }, [notification]);
 
+  // Clean up any legacy local storage key on startup so it never contaminates accounts
+  useEffect(() => {
+    localStorage.removeItem("zipgroups_user_settings_v1");
+  }, []);
+
+  // Listen to all cloud users for real group member counts & real Top Hosts leaderboard
+  useEffect(() => {
+    const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
+      const list: Record<string, any>[] = [];
+      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+      setAllCloudUsers(list);
+    });
+    return () => unsubUsers();
+  }, []);
+
+  // Listen to all cloud group events so events, RSVPs & potluck checklists are 100% live in the cloud
+  useEffect(() => {
+    const unsubEvents = onSnapshot(collection(db, "group_events"), (snap) => {
+      const evts: GroupEvent[] = [];
+      snap.forEach(d => evts.push({ ...(d.data() as GroupEvent), id: d.id }));
+      setCloudEvents(evts);
+    });
+    return () => unsubEvents();
+  }, []);
+
+  // Listen to cloud reviews
+  useEffect(() => {
+    const q = query(collection(db, "reviews"), orderBy("timestamp", "desc"));
+    const unsubReviews = onSnapshot(q, (snap) => {
+      const revs: Review[] = [];
+      snap.forEach(d => revs.push({ ...(d.data() as Review), id: d.id }));
+      setReviews(revs);
+    });
+    return () => unsubReviews();
+  }, []);
+
+  // Listen to cloud gallery photos
+  useEffect(() => {
+    const q = query(collection(db, "gallery_photos"), orderBy("timestamp", "desc"));
+    const unsubPhotos = onSnapshot(q, (snap) => {
+      const list: GalleryPhoto[] = [];
+      snap.forEach(d => list.push({ ...(d.data() as GalleryPhoto), id: d.id }));
+      setPhotos(list);
+    });
+    return () => unsubPhotos();
+  }, []);
+
+  // Primary Cloud Profile Sync for the Logged-In User
   useEffect(() => {
     const savedName = localStorage.getItem("zip_user_name");
-    if (savedName) {
-      setUserName(savedName);
-      setIsLoggedIn(true);
+    if (!savedName) return;
 
-      const userDocRef = doc(db, "users", savedName.toLowerCase());
-      const unsubscribeUser = onSnapshot(userDocRef, async (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.hostedCount !== undefined) setUserHostedEvents(data.hostedCount);
-          if (data.status) setUserStatus(data.status);
-          if (data.avatarUrl) setUserAvatarUrl(data.avatarUrl);
-          if (data.discordInviteUrl) setDiscordInviteUrl(data.discordInviteUrl);
-          if (data.discordLinked !== undefined) setDiscordLinked(data.discordLinked);
-          if (data.showDiscordOnCard !== undefined) setShowDiscordOnCard(data.showDiscordOnCard); 
-          if (data.cardBannerUrl) setUserCardBannerUrl(data.cardBannerUrl);
-          if (data.cardThemeGradient) setUserCardThemeGradient(data.cardThemeGradient);
-          if (data.emergencyContactName) setEmergencyContactName(data.emergencyContactName);
-          if (data.emergencyContactEmail) setEmergencyContactEmail(data.emergencyContactEmail);
-          if (data.emergencyContactPhone) setEmergencyContactPhone(data.emergencyContactPhone);
-          if (data.emergencyContactCarrier) setEmergencyContactCarrier(data.emergencyContactCarrier);
-          if (data.isSubscribed) setIsSubscribedHost(data.isSubscribed);
-          if (data.joinedGroups) setJoinedGroups(new Set(data.joinedGroups));
-          if (data.friendRequests) setFriendRequests(data.friendRequests);
-          if (data.savedZips) setSavedZips(data.savedZips);
-          if (data.email) {
-            setUserEmail(data.email);
-            setEmailSignupInput(data.email);
-          }
-          if (data.phone) {
-            setUserPhone(data.phone);
-            setPhoneInput(data.phone);
-          }
-          if (data.showEmailPublic !== undefined) setShowEmailPublic(data.showEmailPublic);
-          if (data.showPhonePublic !== undefined) setShowPhonePublic(data.showPhonePublic);
-          if (data.isEmailVerified !== undefined) setIsEmailVerified(data.isEmailVerified);
-          if (data.isEmailVerified !== undefined) setIsEmailVerified(data.isEmailVerified);
-          if (data.unreadCount !== undefined) setUnreadCount(data.unreadCount);
-          if (data.dob) {
-            setAgeCategory(calculateAgeCategory(data.dob));
-          } else if (data.ageCategory) {
-            setAgeCategory(data.ageCategory);
-          }
+    setUserName(savedName);
+    setIsLoggedIn(true);
 
-          setFriendRequestsCount((data.friendRequests || []).length);
-
-          // Revert back to just Zip Bot as the default
-          const rawFriends: string[] = data.friends || ["Zip Bot"];
-          const ensuredFriends = Array.from(new Set(rawFriends));
-
-          const resolvedFriends: ZipFriend[] = [ZIP_BOT_FRIEND];
-
-          for (const fName of ensuredFriends) {
-            // Only skip Zip Bot now
-            if (fName.toLowerCase() === "zip bot") continue;
-
-            try {
-              const friendDocRef = doc(db, "users", fName.toLowerCase());
-              const friendSnap = await getDoc(friendDocRef);
-              if (friendSnap.exists()) {
-                const fData = friendSnap.data();
-                resolvedFriends.push({
-                  id: `f-${fName.toLowerCase()}`,
-                  name: fData.name || fName,
-                  handle: `@${fName.toLowerCase()}`,
-                  status: fData.status || "Online",
-                  mutualGroups: 2,
-                  avatarColor: "bg-blue-600",
-                  avatarInitials: (fData.name || fName).slice(0, 2).toUpperCase(),
-                  avatarUrl: fData.avatarUrl || undefined,
-                  cardBannerUrl: fData.cardBannerUrl || undefined,
-                  cardThemeGradient: fData.cardThemeGradient || "from-purple-900 via-indigo-950 to-black",
-                  hostedCount: fData.hostedCount || 0,
-                  streak: fData.streak || 0,
-                  stellarRating: fData.stellarRating || 0,
-                  stellarReviews: fData.stellarReviews || 0,
-                  ageCategory: fData.dob ? calculateAgeCategory(fData.dob) : (fData.ageCategory || "Adult 18+"),
-                  email: fData.email,
-                  phone: fData.phone,
-                  showEmailPublic: fData.showEmailPublic,
-                  showPhonePublic: fData.showPhonePublic
-                });
-              }
-            } catch (err) {
-              console.error("Error resolving friend card data:", err);
-            }
-          }
-
-          setFriendsList(resolvedFriends);
+    const userDocRef = doc(db, "users", savedName.toLowerCase());
+    const unsubscribeUser = onSnapshot(userDocRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setUserName(data.name || data.userName || savedName);
+        setUserHostedEvents(data.hostedCount || 0);
+        setUserStreak(data.streak || 0);
+        setUserStellarRating(data.stellarRating || 0);
+        setUserStellarReviews(data.stellarReviews || 0);
+        setUserStatus(data.status || "Online");
+        setUserAvatarUrl(data.avatarUrl || null);
+        setUserCardBannerUrl(data.cardBannerUrl || null);
+        setUserCardThemeGradient(data.cardThemeGradient || "from-purple-950 via-indigo-950 to-black");
+        setDiscordInviteUrl(data.discordInviteUrl || "");
+        setDiscordLinked(Boolean(data.discordInviteUrl));
+        setShowDiscordOnCard(data.showDiscordOnCard !== undefined ? data.showDiscordOnCard : true);
+        setEmergencyContactName(data.emergencyContactName || "");
+        setEmergencyContactEmail(data.emergencyContactEmail || "");
+        setEmergencyContactPhone(data.emergencyContactPhone || "");
+        setEmergencyContactCarrier(data.emergencyContactCarrier || "verizon");
+        setIsSubscribedHost(Boolean(data.isSubscribed));
+        setJoinedGroups(new Set(Array.isArray(data.joinedGroups) ? data.joinedGroups : []));
+        setFavorites(new Set(Array.isArray(data.favorites) ? data.favorites : []));
+        setFriendRequests(Array.isArray(data.friendRequests) ? data.friendRequests : []);
+        setSavedZips(Array.isArray(data.savedZips) ? data.savedZips : []);
+        setUserEmail(data.email || "");
+        setEmailSignupInput(data.email || "");
+        setUserPhone(data.phone || "");
+        setPhoneInput(data.phone || "");
+        setUserAge(data.age || "");
+        setUserGender(data.gender || "");
+        setShowEmailPublic(Boolean(data.showEmailPublic));
+        setShowPhonePublic(Boolean(data.showPhonePublic));
+        setIsEmailVerified(Boolean(data.isEmailVerified));
+        setUnreadCount(data.unreadCount || 0);
+        if (data.password) setStoredPassword(data.password);
+        if (data.shippingAddress) setShippingAddress(data.shippingAddress);
+        if (data.dob) {
+          setAgeCategory(calculateAgeCategory(data.dob));
+        } else if (data.ageCategory) {
+          setAgeCategory(data.ageCategory);
         }
-      });
+
+        setFriendRequestsCount((data.friendRequests || []).length);
+
+        const rawFriends: string[] = data.friends || ["Zip Bot", "Heather"];
+        const ensuredFriends = Array.from(new Set(["Zip Bot", "Heather", ...rawFriends]));
+        const resolvedFriends: ZipFriend[] = [ZIP_BOT_FRIEND];
+
+        for (const fName of ensuredFriends) {
+          if (fName.toLowerCase() === "zip bot") continue;
+          if (fName.toLowerCase() === savedName.toLowerCase()) continue;
+
+          try {
+            const friendDocRef = doc(db, "users", fName.toLowerCase());
+            const friendSnap = await getDoc(friendDocRef);
+            if (friendSnap.exists()) {
+              const fData = friendSnap.data();
+              resolvedFriends.push({
+                id: `f-${fName.toLowerCase()}`,
+                name: fData.name || fName,
+                handle: `@${fName.toLowerCase()}`,
+                status: fData.status || "Online",
+                mutualGroups: 1,
+                avatarColor: "bg-blue-600",
+                avatarInitials: (fData.name || fName).slice(0, 2).toUpperCase(),
+                avatarUrl: fData.avatarUrl || undefined,
+                cardBannerUrl: fData.cardBannerUrl || undefined,
+                cardThemeGradient: fData.cardThemeGradient || "from-purple-950 via-indigo-950 to-black",
+                hostedCount: fData.hostedCount || 0,
+                streak: fData.streak || 0,
+                stellarRating: fData.stellarRating || 0,
+                stellarReviews: fData.stellarReviews || 0,
+                ageCategory: fData.dob ? calculateAgeCategory(fData.dob) : (fData.ageCategory || "Adult 18+"),
+                email: fData.email,
+                phone: fData.phone,
+                showEmailPublic: fData.showEmailPublic,
+                showPhonePublic: fData.showPhonePublic,
+                discordInviteUrl: fData.discordInviteUrl || "",
+                discordLinked: Boolean(fData.discordInviteUrl),
+                showDiscordOnCard: fData.showDiscordOnCard !== undefined ? fData.showDiscordOnCard : true,
+                isDefault: fName.toLowerCase() === "heather"
+              });
+            }
+          } catch (err) {
+            console.error("Error resolving friend card data:", err);
+          }
+        }
+
+        setFriendsList(resolvedFriends);
+      }
+    });
 
     return () => unsubscribeUser();
-  }
-}, []);
+  }, [userName]);
 
+  // Group Chat Messages Listener
   useEffect(() => {
     if (!selectedGroup) return; 
 
-    // Use "host_hq_messages" for Zip Hosts Connect, and standard group messages for everything else
     const messagesRef = selectedGroup.isHostOnly
       ? collection(db, "host_hq_messages")
       : collection(db, "groups", selectedGroup.id, "messages");
@@ -1022,23 +1030,17 @@ export default function Home() {
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const liveMessages: ChatMessage[] = [];
-      snapshot.forEach((doc) => {
-        liveMessages.push(doc.data() as ChatMessage);
+      snapshot.forEach((docSnap) => {
+        liveMessages.push(docSnap.data() as ChatMessage);
       });
-      
-      if (liveMessages.length > 0) {
-        const updatedMessages = selectedGroup.isHostOnly
-          ? [HOST_HQ_GROUP.chatMessages[0], ...liveMessages]
-          : liveMessages;
-
-        setSelectedGroup(prev => prev ? { ...prev, chatMessages: updatedMessages } : prev);
-        setGroups(prevGroups => prevGroups.map(g => g.id === selectedGroup?.id ? { ...g, chatMessages: updatedMessages } : g));
-      }
+      setSelectedGroup(prev => prev ? { ...prev, chatMessages: liveMessages } : prev);
+      setGroups(prevGroups => prevGroups.map(g => g.id === selectedGroup?.id ? { ...g, chatMessages: liveMessages } : g));
     });
 
     return () => unsubscribe();
   }, [selectedGroup?.id]);
 
+  // Direct Messages Listener
   useEffect(() => {
     if (!activePM || activePM.isBot || !userName) return;
 
@@ -1056,67 +1058,108 @@ export default function Home() {
     return () => unsubscribe();
   }, [activePM, userName]);
 
-useEffect(() => {
-    if (!selectedGroup) return; // Wait until a group is opened
+  // Active Group Members Listener (Real Cloud Users in this Group)
+  useEffect(() => {
+    if (!selectedGroup) return;
 
-    // Ask Firebase to find all users who have this group's ID in their joinedGroups array
-    const membersQuery = query(
-      collection(db, "users"),
-      where("joinedGroups", "array-contains", selectedGroup.id)
-    );
+    const membersQuery = selectedGroup.isHostOnly
+      ? query(collection(db, "users"), where("isSubscribed", "==", true))
+      : query(collection(db, "users"), where("joinedGroups", "array-contains", selectedGroup.id));
 
-    // Listen live for any changes
     const unsubscribe = onSnapshot(membersQuery, (snapshot) => {
-      const liveMembers = snapshot.docs.map(doc => ({
-        id: doc.id, 
-        ...doc.data()
+      const liveMembers = snapshot.docs.map(docSnap => ({
+        id: docSnap.id, 
+        ...docSnap.data()
       }));
       setActiveGroupMembers(liveMembers);
     });
 
     return () => unsubscribe(); 
-  }, [selectedGroup]);
+  }, [selectedGroup?.id, selectedGroup?.isHostOnly]);
 
-  
+  // Real Safety Check-In Timer & Auto-Failsafe Dispatch
+  useEffect(() => {
+    if (!safetyActive) {
+      setSafetyPromptDue(false);
+      setSafetyGraceSeconds(600);
+      return;
+    }
+
+    const intervalMs = safetyIntervalHours * 60 * 60 * 1000;
+    const checkInTimer = setTimeout(() => {
+      setSafetyPromptDue(true);
+      setSafetyGraceSeconds(600);
+      setNotification("🛡️ SAFETY CHECK-IN: Please confirm you are safe within 10 minutes!");
+    }, intervalMs);
+
+    return () => clearTimeout(checkInTimer);
+  }, [safetyActive, safetyIntervalHours]);
+
+  useEffect(() => {
+    if (!safetyActive || !safetyPromptDue) return;
+
+    if (safetyGraceSeconds <= 0) {
+      setSafetyPromptDue(false);
+      setSafetyActive(false);
+      handleBroadcastEmergency(true);
+      return;
+    }
+
+    const graceInterval = setInterval(() => {
+      setSafetyGraceSeconds(prev => prev - 1);
+    }, 1000);
+
+    return () => clearInterval(graceInterval);
+  }, [safetyActive, safetyPromptDue, safetyGraceSeconds]);
 
   // ==========================================
-  // 6. ACTION HANDLERS
+  // 6. ACTION HANDLERS (100% CLOUD SYNCED)
   // ==========================================
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userNameInput.trim()) return;
+    if (passwordInput.length < 8) {
+      setNotification("⚠️ Password must be at least 8 characters long.");
+      return;
+    }
+
     const finalName = userNameInput.trim();
 
     try {
       const userDocRef = doc(db, "users", finalName.toLowerCase());
       const docSnap = await getDoc(userDocRef);
 
-      if (docSnap.exists() && localStorage.getItem("zip_user_name")?.toLowerCase() !== finalName.toLowerCase()) {
-        setNotification(`⚠️ Username "@${finalName}" is already taken! Please choose another handle.`);
+      if (docSnap.exists()) {
+        setNotification(`⚠️ Username "@${finalName}" is already registered! Please log in or choose another handle.`);
         return;
       }
 
       const computedAgeCategory = calculateAgeCategory(dobInput);
 
-      // 1. Always save session to localStorage so refreshing never logs the new user out
+      // Clear any previous user session state first
+      localStorage.removeItem("zipgroups_user_settings_v1");
       localStorage.setItem("zip_user_name", finalName);
       localStorage.setItem("zip_is_logged_in", "true");
 
-      // 2. Wipe any leftover state from a previous logged-in account
       setUserName(finalName);
       setAgeCategory(computedAgeCategory);
       setUserAvatarUrl(null);
       setUserCardBannerUrl(null);
-      setUserCardThemeGradient("from-purple-900 via-indigo-950 to-black");
+      setDiscordInviteUrl("");
+      setDiscordLinked(false);
+      setShowDiscordOnCard(true);
+      setUserCardThemeGradient("from-purple-950 via-indigo-950 to-black");
       setUserHostedEvents(0);
       setIsSubscribedHost(false);
       setUserEmail(emailSignupInput.trim());
       setUserPhone(phoneInput.trim());
+      setStoredPassword(passwordInput);
+      setIsEmailVerified(false);
       setIsLoggedIn(true);
 
-      // 3. Save clean default values to Firestore (not previous user's state!)
       await setDoc(userDocRef, {
         name: finalName,
+        userName: finalName,
         firstName: firstNameInput.trim(),
         lastName: lastNameInput.trim(),
         dob: dobInput,
@@ -1126,19 +1169,32 @@ useEffect(() => {
         password: passwordInput,
         isEmailVerified: false,
         hostedCount: 0,
+        streak: 0,
+        stellarRating: 5.0,
+        stellarReviews: 0,
         status: "Online",
         avatarUrl: "",
         cardBannerUrl: "",
-        cardThemeGradient: "from-purple-900 via-indigo-950 to-black",
+        cardThemeGradient: "from-purple-950 via-indigo-950 to-black",
+        discordInviteUrl: "",
+        discordLinked: false,
+        showDiscordOnCard: true,
+        showEmailPublic: false,
+        showPhonePublic: false,
+        emergencyContactName: "",
+        emergencyContactPhone: "",
+        emergencyContactCarrier: "verizon",
+        emergencyContactEmail: "",
         isSubscribed: false,
         joinedGroups: [],
+        favorites: [],
         friends: ["Zip Bot", "Heather"],
         friendRequests: [],
         savedZips: [],
-        unreadCount: 0
-      }, { merge: true });
+        unreadCount: 0,
+        createdAt: Date.now()
+      });
 
-      // 4. Also add the new user to Heather's friends list so their PMs show up for Heather!
       if (finalName.toLowerCase() !== "heather") {
         const heatherRef = doc(db, "users", "heather");
         const heatherSnap = await getDoc(heatherRef);
@@ -1153,71 +1209,58 @@ useEffect(() => {
       }
 
       setIsAuthOpen(false);
-      setNotification(`Welcome, ${firstNameInput || finalName}! Profile securely stored to cloud.`);
-
-      // 5. Reload cleanly so Firebase listeners attach to the new account
-      setTimeout(() => {
-        window.location.reload();
-      }, 400);
-
+      setNotification(`✅ Welcome, ${firstNameInput || finalName}! Click "Verify Email Now" to verify your email.`);
+      
+      if (pendingAction) {
+        setTimeout(() => {
+          pendingAction();
+          setPendingAction(null);
+        }, 300);
+      }
     } catch (err) {
-      console.error("Error creating full user profile in Firestore:", err);
-    }
-
-    setIsAuthOpen(false);
-    setNotification(`Welcome, ${firstNameInput || finalName}! Profile securely stored to cloud.`);
-    
-    if (pendingAction) {
-      setTimeout(() => {
-        pendingAction();
-        setPendingAction(null);
-      }, 300);
+      console.error("Error creating user profile in Firestore:", err);
+      setNotification("❌ Error creating account. Please check your connection.");
     }
   };
 
-const handleSaveAccountSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setUserStatus(userStatus);
-    setUserCardThemeGradient(userCardThemeGradient);
+  const handleSaveAccountSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!userName) return;
 
-    if (userName) {
-      try {
-        await setDoc(doc(db, "users", userName.toLowerCase()), {
-          name: userName,
-          status: userStatus,
-          avatarUrl: userAvatarUrl || "",
-          cardBannerUrl: userCardBannerUrl || "",
-          cardThemeGradient: userCardThemeGradient,
-          age: userAge,
-          gender: userGender,
-          email: userEmail,
-          phone: userPhone,
-          showEmailPublic,
-          showPhonePublic,
-          emergencyContactName: emergencyContactName?.trim() || "",
-          emergencyContactEmail: emergencyContactEmail?.trim() || "",
-          emergencyContactPhone: emergencyContactPhone?.trim() || "",
-          emergencyContactCarrier: emergencyContactCarrier || "verizon",
-        }, { merge: true });
-      } catch (err) {
-        console.error("Error saving account settings to Firestore:", err);
-      }
+    const cleanDiscord = discordInviteUrl.trim();
+    const isLinked = cleanDiscord.length > 0;
+    setDiscordLinked(isLinked);
 
-// --- ADD THIS DISCORD SAVE BLOCK ---
     try {
-      const userIdentifier = userName?.trim() || "heather"; 
-      await setDoc(doc(db, "users", userIdentifier.toLowerCase()), {
-        discordInviteUrl: discordInviteUrl,
-        discordLinked: discordInviteUrl.trim().length > 0
+      await setDoc(doc(db, "users", userName.toLowerCase()), {
+        name: userName,
+        userName: userName,
+        status: userStatus,
+        avatarUrl: userAvatarUrl || "",
+        cardBannerUrl: userCardBannerUrl || "",
+        cardThemeGradient: userCardThemeGradient,
+        age: userAge,
+        gender: userGender,
+        email: userEmail.trim(),
+        phone: userPhone.trim(),
+        showEmailPublic,
+        showPhonePublic,
+        discordInviteUrl: cleanDiscord,
+        discordLinked: isLinked,
+        showDiscordOnCard,
+        emergencyContactName: emergencyContactName.trim(),
+        emergencyContactEmail: emergencyContactEmail.trim(),
+        emergencyContactPhone: emergencyContactPhone.trim(),
+        emergencyContactCarrier: emergencyContactCarrier || "verizon",
+        shippingAddress
       }, { merge: true });
-    } catch (err) {
-      console.error("Error saving Discord info to Firestore:", err);
-    }
-}
-    // -----------------------------------
 
-    setIsAccountSettingsOpen(false);
-    setNotification("Account settings & cloud profile updated!");
+      setIsAccountSettingsOpen(false);
+      setNotification("✅ Profile, Photos, Discord & Safety Settings saved to the cloud!");
+    } catch (err) {
+      console.error("Error saving account settings to Firestore:", err);
+      setNotification("❌ Failed to save settings to cloud. Try a smaller image if uploading.");
+    }
   };
 
   const handleExistingLogin = async () => {
@@ -1231,7 +1274,7 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
       const userRef = doc(db, "users", cleanUsername.toLowerCase());
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) {
-        setNotification("❌ Account not found. Please check your username.");
+        setNotification("❌ Account not found in cloud directory. Please check your username.");
         return;
       }
 
@@ -1247,44 +1290,37 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
 
       const resolvedName = data.name || data.userName || cleanUsername;
 
-   // Log the user in and save session
-      setUserName(resolvedName);
-      setIsLoggedIn(true);
+      // Wipe any previous account state completely before applying cloud data
+      localStorage.removeItem("zipgroups_user_settings_v1");
       localStorage.setItem("zip_user_name", resolvedName);
       localStorage.setItem("zip_is_logged_in", "true");
 
-      // Load ALL saved profile settings, selfie, and safety contact details
-      if (data.age) setUserAge(data.age);
-      if (data.dob) {
-        setAgeCategory(calculateAgeCategory(data.dob));
-      } else if (data.ageCategory) {
-        setAgeCategory(data.ageCategory);
-      }
-      if (data.email) setUserEmail(data.email);
-      if (data.phone) setUserPhone(data.phone);  
-      if (data.gender) setUserGender(data.gender);
-      if (data.avatarUrl) setUserAvatarUrl(data.avatarUrl);
-      if (data.cardBannerUrl) setUserCardBannerUrl(data.cardBannerUrl);
-      if (data.status) setUserStatus(data.status);
-      if (data.cardThemeGradient) setUserCardThemeGradient(data.cardThemeGradient);
-      if (data.showEmailPublic !== undefined) setShowEmailPublic(data.showEmailPublic);
-      if (data.showPhonePublic !== undefined) setShowPhonePublic(data.showPhonePublic);
-      
-      // Safety Contact Fields
-      if (data.emergencyContactName) setEmergencyContactName(data.emergencyContactName);
-      if (data.emergencyContactEmail) setEmergencyContactEmail(data.emergencyContactEmail);
-      if (data.emergencyContactPhone) setEmergencyContactPhone(data.emergencyContactPhone);
-      if (data.emergencyContactCarrier) setEmergencyContactCarrier(data.emergencyContactCarrier);
-
+      setUserName(resolvedName);
+      setIsLoggedIn(true);
+      setUserAge(data.age || "");
+      setAgeCategory(data.dob ? calculateAgeCategory(data.dob) : (data.ageCategory || "Adult 18+"));
+      setUserEmail(data.email || "");
+      setUserPhone(data.phone || "");
+      setUserGender(data.gender || "");
+      setUserAvatarUrl(data.avatarUrl || null);
+      setUserCardBannerUrl(data.cardBannerUrl || null);
+      setUserStatus(data.status || "Online");
+      setUserCardThemeGradient(data.cardThemeGradient || "from-purple-950 via-indigo-950 to-black");
+      setShowEmailPublic(Boolean(data.showEmailPublic));
+      setShowPhonePublic(Boolean(data.showPhonePublic));
+      setDiscordInviteUrl(data.discordInviteUrl || "");
+      setDiscordLinked(Boolean(data.discordInviteUrl));
+      setShowDiscordOnCard(data.showDiscordOnCard !== undefined ? data.showDiscordOnCard : true);
+      setEmergencyContactName(data.emergencyContactName || "");
+      setEmergencyContactEmail(data.emergencyContactEmail || "");
+      setEmergencyContactPhone(data.emergencyContactPhone || "");
+      setEmergencyContactCarrier(data.emergencyContactCarrier || "verizon");
       setStoredPassword(data.password || loginPassword);
-      if (data.isEmailVerified !== undefined) setIsEmailVerified(data.isEmailVerified);
+      setIsEmailVerified(Boolean(data.isEmailVerified));
 
       setLoginPassword("");
       setIsAuthOpen(false);
       setNotification(`✅ Welcome back, ${data.firstName || resolvedName}!`);
-
-      // Reload page state cleanly so any startup listeners fetch friends & groups
-      window.location.reload();
     } catch (err) {
       console.error(err);
       setNotification("❌ Error logging in. Please try again.");
@@ -1297,8 +1333,8 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
       setNotification("❌ Current password incorrect.");
       return;
     }
-    if (!newPasswordInput || newPasswordInput.length < 6) {
-      setNotification("⚠️ New password must be at least 6 characters.");
+    if (!newPasswordInput || newPasswordInput.length < 8) {
+      setNotification("⚠️ New password must be at least 8 characters.");
       return;
     }
 
@@ -1313,30 +1349,63 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
           { password: newPasswordInput },
           { merge: true }
         );
+        setNotification("🔒 Password updated in the cloud successfully!");
       } catch (err) {
         console.error(err);
+        setNotification("❌ Error updating password in cloud.");
       }
     }
-    setNotification("🔒 Password saved to your account successfully!");
   };
 
-  const handleResetPasswordLink = () => {
-    if (!emailSignupInput && !userEmail) {
-      setNotification("⚠️ Please enter your email address on the form first.");
-      return;
-    }
-    setNotification(`📧 Verification reset link sent to ${emailSignupInput || userEmail}! Check your inbox.`);
-  };
-
+  // Real Email Verification Code Dispatcher
   const handleSendVerificationEmail = async () => {
-    const targetEmail = userEmail || emailSignupInput;
+    const targetEmail = (userEmail || emailSignupInput).trim();
     if (!targetEmail) {
-      setNotification("⚠️ No email address found for this account.");
+      setNotification("⚠️ Please add your email address in Account Settings first.");
+      setIsAccountSettingsOpen(true);
       return;
     }
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    setNotification(`📧 Verification code ${verificationCode} sent to ${targetEmail}!`);
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setVerificationCodeSent(code);
+    setVerificationCodeInput("");
+    setIsVerifyModalOpen(true);
+    setIsSendingCode(true);
+
+    try {
+      const res = await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "verify_email",
+          email: targetEmail,
+          userName: userName || "Neighbor",
+          verificationCode: code
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNotification(`📧 A 6-digit verification code has been emailed to ${targetEmail}!`);
+      } else {
+        setNotification(`⚠️ Email server notice: ${data.error || "Check spam folder for your code."}`);
+      }
+    } catch (err) {
+      console.error("Verification email error:", err);
+      setNotification("⚠️ Could not reach email server. Please check your /api/send-email route.");
+    } finally {
+      setIsSendingCode(false);
+    }
+  };
+
+  const handleConfirmVerificationCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verificationCodeSent || verificationCodeInput.trim() !== verificationCodeSent) {
+      setNotification("❌ Invalid verification code. Please check your email and try again.");
+      return;
+    }
+
     setIsEmailVerified(true);
+    setIsVerifyModalOpen(false);
     if (userName) {
       try {
         await setDoc(doc(db, "users", userName.toLowerCase()), { isEmailVerified: true }, { merge: true });
@@ -1344,9 +1413,81 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
         console.error(err);
       }
     }
+    setNotification("✅ Your email address is now officially verified!");
   };
 
- const handleActivateSubscription = async () => {
+  // Real Forgot/Reset Password Flow
+  const handleSendPasswordResetCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUser = resetUsernameInput.trim().toLowerCase();
+    const cleanEmail = resetEmailInput.trim().toLowerCase();
+    if (!cleanUser || !cleanEmail) {
+      setNotification("⚠️ Please enter both your username and email address.");
+      return;
+    }
+
+    try {
+      const userSnap = await getDoc(doc(db, "users", cleanUser));
+      if (!userSnap.exists()) {
+        setNotification("❌ Username not found.");
+        return;
+      }
+      const uData = userSnap.data();
+      if ((uData.email || "").toLowerCase() !== cleanEmail) {
+        setNotification("❌ That email does not match the email on file for this username.");
+        return;
+      }
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      setResetCodeSent(code);
+      setResetStep("verify");
+
+      await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "reset_password",
+          email: uData.email,
+          userName: uData.name || cleanUser,
+          verificationCode: code
+        })
+      });
+
+      setNotification(`📧 Password reset code sent to ${uData.email}!`);
+    } catch (err) {
+      console.error(err);
+      setNotification("❌ Error initiating password reset.");
+    }
+  };
+
+  const handleCompletePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resetCodeInput.trim() !== resetCodeSent) {
+      setNotification("❌ Invalid reset code.");
+      return;
+    }
+    if (resetNewPassword.length < 8) {
+      setNotification("⚠️ New password must be at least 8 characters.");
+      return;
+    }
+
+    try {
+      await setDoc(doc(db, "users", resetUsernameInput.trim().toLowerCase()), {
+        password: resetNewPassword
+      }, { merge: true });
+
+      setIsResetModalOpen(false);
+      setResetStep("request");
+      setResetCodeInput("");
+      setResetNewPassword("");
+      setNotification("✅ Password reset! You can now log in with your new password.");
+    } catch (err) {
+      console.error(err);
+      setNotification("❌ Failed to update password.");
+    }
+  };
+
+  const handleActivateSubscription = async () => {
     if (!subTermsAgreed) {
       setNotification("Please check the box to agree to the 7-Day Free Trial terms.");
       return;
@@ -1367,7 +1508,8 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
       try {
         await setDoc(doc(db, "users", userName.toLowerCase()), {
           isSubscribed: true,
-          hostedCount: nextHosted
+          hostedCount: nextHosted,
+          shippingAddress
         }, { merge: true });
       } catch (err) {
         console.error("Error updating subscription in Firestore:", err);
@@ -1385,7 +1527,7 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
     }
   };
 
- const handlePartnerSubmit = async (e: React.FormEvent) => {
+  const handlePartnerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!partnerBusinessName.trim() || !partnerAddress.trim() || !partnerEmail.trim()) {
       setNotification("Please fill out business name, address, and email.");
@@ -1399,76 +1541,72 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
     window.location.href = adminEmailUrl;
 
     setIsPartnerModalOpen(false);
-    setNotification(`🎉 Partner Venue application for ${partnerBusinessName} submitted successfully ($35/mo partnership active)! Confirmation sent to vendor email.`);
+    setNotification(`🎉 Partner Venue application for ${partnerBusinessName} submitted!`);
     setPartnerBusinessName(""); setPartnerAddress(""); setPartnerPhone(""); setPartnerEmail(""); setPartnerHours(""); setPartnerPerk(""); setPartnerMenu("");
   };
-    
-    const handleBroadcastEmergency = () => {
-    console.log("Broadcasting emergency with:", {
-      name: emergencyContactName,
-      email: emergencyContactEmail,
-      phone: emergencyContactPhone,
-      carrier: emergencyContactCarrier
-    });
 
-    if (!emergencyContactEmail && !emergencyContactPhone) {
-      setNotification("⚠️ Please set an Emergency Contact Email or Phone in Account Settings first!");
+  // Real Emergency Email + Carrier SMS Dispatch (With GPS Fallback so it NEVER silently fails)
+  const handleBroadcastEmergency = async (isAutoTimerExpiry = false) => {
+    if (!emergencyContactEmail.trim() && !emergencyContactPhone.trim()) {
+      setNotification("⚠️ Please save an Emergency Contact Email or Phone in Account Settings first!");
       setIsEmergencyModalOpen(false);
       setIsAccountSettingsOpen(true);
       return;
     }
 
+    setNotification("🚨 Dispatching Emergency Email & SMS Alert to your safety contact...");
+
+    const dispatchAlert = async (mapsUrl: string) => {
+      try {
+        const res = await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'emergency',
+            isAutoTimerExpiry,
+            email: emergencyContactEmail.trim(),
+            emergencyContactEmail: emergencyContactEmail.trim(),
+            userName: userName || "A Zip Groups Member",
+            userPhone: userPhone || "",
+            emergencyContactName: emergencyContactName.trim() || "Emergency Contact",
+            emergencyContactPhone: emergencyContactPhone.trim() || "",
+            emergencyContactCarrier: emergencyContactCarrier || "verizon",
+            mapsUrl,
+            locationLink: mapsUrl,
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          setNotification("🚨 Emergency Email & SMS Text successfully sent to your safety contact!");
+        } else {
+          setNotification(`❌ Alert error: ${data.error || "Check /api/send-email configuration."}`);
+        }
+      } catch (err) {
+        console.error(err);
+        setNotification("❌ Network error connecting to emergency alert server.");
+      }
+      setIsEmergencyModalOpen(false);
+    };
+
     if (!navigator.geolocation) {
-      setNotification("❌ Geolocation is not supported by your browser.");
+      await dispatchAlert(`https://maps.google.com/?q=${encodeURIComponent(zipCode || "43230")}`);
       return;
     }
-
-    setNotification("📍 Acquiring live GPS coordinates...");
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        const mapsUrl = `https://maps.google.com/?q=${lat},${lng}`;
-
-        try {
-         const res = await fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: emergencyContactEmail,
-              emergencyContactEmail: emergencyContactEmail,
-              type: 'emergency',
-              userName: userName || "A Zip Groups User",
-              emergencyContactName: emergencyContactName || "Emergency Contact",
-              emergencyContactPhone: emergencyContactPhone || "",
-              emergencyContactCarrier: emergencyContactCarrier || "verizon",
-              mapsUrl: mapsUrl,
-              locationLink: mapsUrl,
-            })
-          });
-
-          const data = await res.json();
-
-          if (data.success) {
-            setNotification("🚨 Live GPS emergency alert successfully emailed to your contact!");
-          } else {
-            setNotification(`❌ Failed to send alert email: ${data.error}`);
-          }
-        } catch (err) {
-          console.error(err);
-          setNotification("❌ Network error connecting to emergency email server.");
-        }
-        setIsEmergencyModalOpen(false);
+        await dispatchAlert(`https://maps.google.com/?q=${lat},${lng}`);
       },
-      (error) => {
-        console.error(error);
-        setNotification("❌ Unable to retrieve your location. Please check browser permissions.");
+      async () => {
+        // Fallback if GPS permission is denied or times out so alert still goes out immediately!
+        await dispatchAlert(`https://maps.google.com/?q=${encodeURIComponent(zipCode || "43230")} (GPS Permission Off)`);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 7000, maximumAge: 0 }
     );
   };
-
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1491,7 +1629,6 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
     setIsHeatmapView(false);
     setHasSearched(true);
     setSelectedGroup(null);
-    setNotification("Search initiated successfully!");
   };
 
   const toggleSaveZip = async (zipToSave: string) => {
@@ -1568,10 +1705,9 @@ const handleSaveAccountSettings = async (e: React.FormEvent) => {
     });
   };
 
-const searchGiphy = async (searchTerm: string) => {
+  const searchGiphy = async (searchTerm: string) => {
     if (!searchTerm.trim()) return;
     setIsSearchingGifs(true);
-
     const GIPHY_KEY = process.env.NEXT_PUBLIC_GIPHY_API_KEY || "uNheMSXmawLTxJHi9AJqdzhiAbrTFozB";
 
     try {
@@ -1644,12 +1780,7 @@ const searchGiphy = async (searchTerm: string) => {
       setZipBotMessages(newMessages);
       setPmInput("");
 
-      const activeEventsSummary = groups.flatMap(g => 
-        g.events.map(e => {
-          if (typeof e === 'string') return `Group: ${g.name} (Zip: ${g.zipCode}) - Event: ${e}`;
-          return `Group: ${g.name} (Zip: ${g.zipCode}) - Event: ${e.title} at ${e.locationName}`;
-        })
-      );
+      const activeEventsSummary = cloudEvents.map(e => `Group: ${e.groupName} (Zip: ${e.zipCode}) - Event: ${e.title} at ${e.locationName}`);
 
       try {
         const res = await fetch('/api/zipbot', {
@@ -1672,7 +1803,7 @@ const searchGiphy = async (searchTerm: string) => {
           { id: Date.now() + 1, sender: "Zip Bot", text: "Oops! My neighborhood GPS just blinked. Ask me again in a second!", time: timeNow }
         ]);
       }
-   } else {
+    } else {
       const chatRoomId = [userName.toLowerCase(), activePM.name.toLowerCase()].sort().join("_");
       try {
         await addDoc(collection(db, "chats", chatRoomId, "messages"), {
@@ -1684,7 +1815,6 @@ const searchGiphy = async (searchTerm: string) => {
         });
         setPmInput("");
 
-        // Ensure sender appears in recipient's Messages list & increment unread badge
         const recipientRef = doc(db, "users", activePM.name.toLowerCase());
         const recipientSnap = await getDoc(recipientRef);
         if (recipientSnap.exists()) {
@@ -1703,6 +1833,7 @@ const searchGiphy = async (searchTerm: string) => {
     }
   };
 
+  // Cloud-Synced Event Creation
   const handleHostSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     requireHostSubscription(async () => {
@@ -1722,62 +1853,41 @@ const searchGiphy = async (searchTerm: string) => {
         name: item.trim()
       }));
 
-      const newEventObj: GroupEvent = {
-        id: Date.now().toString(),
-        title: eventTitle.trim(),
-        description: eventDesc.trim() || "Neighborhood gathering hosted by local community member.",
-        text: formattedEventString,
-        color: chosenTheme.class,
-        host: userName,
-        expirationDate: futureExp.toISOString(),
-        checklist: finalChecklist.length > 0 ? finalChecklist : undefined,
-        locationName: `Hosted by ${userName}`
-      };
-
-      const nextHostCount = userHostedEvents + 1;
-      setUserHostedEvents(nextHostCount);
-
-      if (userName) {
-        try {
-          await setDoc(doc(db, "users", userName.toLowerCase()), { hostedCount: nextHostCount }, { merge: true });
-        } catch (err) {
-          console.error("Error updating hosted count in Firestore:", err);
+      try {
+        for (const z of zips) {
+          const eventId = `evt-${z}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const newEventObj: GroupEvent = {
+            id: eventId,
+            zipCode: z,
+            groupName: selectedCategoryGroup,
+            groupId: selectedGroup && selectedGroup.zipCode === z ? selectedGroup.id : undefined,
+            title: eventTitle.trim(),
+            description: eventDesc.trim() || "Neighborhood gathering hosted by local community member.",
+            text: formattedEventString,
+            color: chosenTheme.class,
+            host: userName,
+            expirationDate: futureExp.toISOString(),
+            checklist: finalChecklist,
+            locationName: `Hosted by ${userName} in Zip ${z}`,
+            isAdultOnly,
+            rsvps: [userName]
+          };
+          await setDoc(doc(db, "group_events", eventId), newEventObj);
         }
+
+        const nextHostCount = userHostedEvents + 1;
+        setUserHostedEvents(nextHostCount);
+        if (userName) {
+          await setDoc(doc(db, "users", userName.toLowerCase()), { hostedCount: nextHostCount }, { merge: true });
+        }
+
+        setIsHostOpen(false);
+        setEventTitle(""); setEventDesc(""); setEventDate(""); setEventTime(""); setHostChecklist([]);
+        setNotification(`🎉 Event "${eventTitle}" published to the cloud!`);
+      } catch (err) {
+        console.error("Error publishing event to cloud:", err);
+        setNotification("❌ Failed to publish event to cloud.");
       }
-
-      setGroups(prevGroups => {
-        let currentGroups = [...prevGroups];
-
-        zips.forEach(zip => {
-          const zipExists = currentGroups.some(g => g.zipCode === zip && !g.isHostOnly);
-          if (!zipExists) {
-            currentGroups = [...currentGroups, ...generateGroupsForZip(zip)];
-          }
-        });
-
-        return currentGroups.map(g => {
-          if (g.isHostOnly) return g;
-          const isTargetZip = zips.includes(g.zipCode);
-          const matchesCategory = g.name.toLowerCase() === selectedCategoryGroup.toLowerCase();
-
-          if (isTargetZip && (matchesCategory || duplicateToAllZips)) {
-            const updatedEvents = [newEventObj, ...(g.events || [])];
-            return { ...g, events: updatedEvents };
-          }
-          return g;
-        });
-      });
-
-      if (selectedGroup) {
-        setSelectedGroup(prev => prev ? {
-          ...prev,
-          events: [newEventObj, ...prev.events]
-        } : null);
-      }
-
-      setIsHostOpen(false);
-      setEventTitle(""); setEventDesc(""); setEventDate(""); setEventTime(""); setHostChecklist([]);
-      setNotification(`🎉 Event "${eventTitle}" published in real time!`);
     });
   };
 
@@ -1786,10 +1896,10 @@ const searchGiphy = async (searchTerm: string) => {
       const newJoined = new Set(joinedGroups);
       if (newJoined.has(groupId)) {
         newJoined.delete(groupId);
-        setNotification("Left group successfully.");
+        setNotification("Left group.");
       } else {
         newJoined.add(groupId);
-        setNotification("Successfully joined group!");
+        setNotification("✅ Joined group! Your profile & Discord are now visible in the roster.");
       }
       setJoinedGroups(newJoined);
 
@@ -1805,104 +1915,80 @@ const searchGiphy = async (searchTerm: string) => {
     });
   };
 
-  const toggleFavorite = (groupId: string) => {
-    requireAuth(() => {
+  const toggleFavorite = async (groupId: string) => {
+    requireAuth(async () => {
       const newFavs = new Set(favorites);
       if (newFavs.has(groupId)) {
         newFavs.delete(groupId);
         setNotification("Removed from favorites.");
       } else {
         newFavs.add(groupId);
-        setNotification("Added to favorites!");
+        setNotification("⭐ Added to favorites!");
       }
       setFavorites(newFavs);
-    });
-  };
 
-  const toggleRSVP = (rsvpKey: string) => {
-    requireAuth(() => {
-      setRsvps(prev => {
-        const nextState = !prev[rsvpKey];
-        setNotification(nextState ? "✅ RSVP confirmed!" : "RSVP cancelled.");
-        return { ...prev, [rsvpKey]: nextState };
-      });
-    });
-  };
-
-  const handleClaimItem = (groupId: string, eventId: string, itemId: string) => {
-    requireAuth(() => {
-      setGroups(prevGroups => prevGroups.map(g => {
-        if (g.id === groupId) {
-          return {
-            ...g,
-            events: g.events.map(e => {
-              if (typeof e !== 'string' && e.id === eventId && e.checklist) {
-                return { ...e, checklist: e.checklist.map(c => c.id === itemId ? { ...c, claimedBy: userName } : c) };
-              }
-              return e;
-            })
-          };
+      if (userName) {
+        try {
+          await setDoc(doc(db, "users", userName.toLowerCase()), {
+            favorites: Array.from(newFavs)
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error syncing favorites:", err);
         }
-        return g;
-      }));
-      if (selectedGroup && selectedGroup.id === groupId) {
-        setSelectedGroup(prev => prev ? {
-          ...prev,
-          events: prev.events.map(e => {
-            if (typeof e !== 'string' && e.id === eventId && e.checklist) {
-              return { ...e, checklist: e.checklist.map(c => c.id === itemId ? { ...c, claimedBy: userName } : c) };
-            }
-            return e;
-          })
-        } : prev);
       }
-      setNotification("Item claimed successfully!");
     });
   };
 
-  const handleEditEvent = (groupId: string, eventId: string, currentText: string) => {
-    const newText = window.prompt("Edit your event details:", currentText);
-    if (!newText || newText === currentText) return;
+  // Real Cloud-Synced RSVP Handler (No fake names!)
+  const toggleRSVP = async (evt: GroupEvent) => {
+    requireAuth(async () => {
+      const currentRsvps = Array.isArray(evt.rsvps) ? [...evt.rsvps] : [];
+      const isAlreadyGoing = currentRsvps.some(u => u.toLowerCase() === userName.toLowerCase());
+      const updatedRsvps = isAlreadyGoing
+        ? currentRsvps.filter(u => u.toLowerCase() !== userName.toLowerCase())
+        : [...currentRsvps, userName];
 
-    setGroups(prevGroups => prevGroups.map(g => {
-      if (g.id === groupId) {
-        return {
-          ...g,
-          events: g.events.map(e => {
-            if (typeof e === 'string') return e === eventId ? newText : e;
-            if (e.id === eventId) return { ...e, text: newText };
-            return e;
-          })
-        };
+      try {
+        await setDoc(doc(db, "group_events", evt.id), { rsvps: updatedRsvps }, { merge: true });
+        setNotification(isAlreadyGoing ? "RSVP cancelled." : "✅ RSVP confirmed in the cloud!");
+      } catch (err) {
+        console.error("Error updating RSVP:", err);
       }
-      return g;
-    }));
-    if (selectedGroup && selectedGroup.id === groupId) {
-      setSelectedGroup(prev => prev ? {
-        ...prev,
-        events: prev.events.map(e => {
-          if (typeof e === 'string') return e === eventId ? newText : e;
-          if (e.id === eventId) return { ...e, text: newText };
-          return e;
-        })
-      } : prev);
-    }
-    setNotification("Event updated successfully!");
+    });
   };
 
-  const handleCancelEvent = (groupId: string, eventId: string) => {
-    if (!window.confirm("Are you sure you want to cancel this event? All RSVPs will be notified.")) return;
-    
-    setGroups(prevGroups => prevGroups.map(g => {
-      if (g.id === groupId) {
-        return { ...g, events: g.events.filter(e => (typeof e === 'string' ? e : e.id) !== eventId) };
+  const handleClaimItem = async (evt: GroupEvent, itemId: string) => {
+    requireAuth(async () => {
+      if (!evt.checklist) return;
+      const updatedChecklist = evt.checklist.map(c => c.id === itemId ? { ...c, claimedBy: userName } : c);
+      try {
+        await setDoc(doc(db, "group_events", evt.id), { checklist: updatedChecklist }, { merge: true });
+        setNotification("✅ Potluck item claimed!");
+      } catch (err) {
+        console.error("Error claiming checklist item:", err);
       }
-      return g;
-    }));
-    if (selectedGroup && selectedGroup.id === groupId) {
-      setSelectedGroup(prev => prev ? { ...prev, events: prev.events.filter(e => (typeof e === 'string' ? e : e.id) !== eventId) } : prev);
+    });
+  };
+
+  const handleEditEvent = async (evt: GroupEvent) => {
+    const newText = window.prompt("Edit your event title:", evt.title || evt.text);
+    if (!newText || newText === evt.title) return;
+    try {
+      await setDoc(doc(db, "group_events", evt.id), { title: newText, text: newText }, { merge: true });
+      setNotification("✅ Event updated in the cloud!");
+    } catch (err) {
+      console.error(err);
     }
-    setNotification("Event cancelled.");
+  };
+
+  const handleCancelEvent = async (evtId: string) => {
+    if (!window.confirm("Are you sure you want to cancel and delete this event?")) return;
+    try {
+      await deleteDoc(doc(db, "group_events", evtId));
+      setNotification("Event cancelled and removed.");
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleBlockUser = (friendId: string) => {
@@ -1913,10 +1999,10 @@ const searchGiphy = async (searchTerm: string) => {
   };
 
   const handleRemoveFriend = async (friendName: string) => {
-  if (friendName.toLowerCase() === "zip bot" || friendName.toLowerCase() === "heather") {
-    setNotification("⚠️ Zip Bot and Heather are permanent default friends and cannot be removed!");
-    return;
-  }
+    if (friendName.toLowerCase() === "zip bot" || friendName.toLowerCase() === "heather") {
+      setNotification("⚠️ Zip Bot and Heather are permanent default friends and cannot be removed!");
+      return;
+    }
     if (!window.confirm(`Are you sure you want to remove ${friendName} from your Zip Friends?`)) return;
 
     try {
@@ -1972,7 +2058,7 @@ const searchGiphy = async (searchTerm: string) => {
       if (!userSnap.exists()) return;
       const data = userSnap.data();
 
-      const currentFriends: string[] = data.friends || ["Zip Bot","Heather"];
+      const currentFriends: string[] = data.friends || ["Zip Bot", "Heather"];
       const currentRequests: string[] = data.friendRequests || [];
 
       if (!currentFriends.includes(reqName)) currentFriends.push(reqName);
@@ -1987,7 +2073,7 @@ const searchGiphy = async (searchTerm: string) => {
       const reqSnap = await getDoc(requesterRef);
       if (reqSnap.exists()) {
         const reqData = reqSnap.data();
-        const reqFriends: string[] = reqData.friends || ["Zip Bot","Heather"];
+        const reqFriends: string[] = reqData.friends || ["Zip Bot", "Heather"];
         if (!reqFriends.includes(userName)) reqFriends.push(userName);
         await setDoc(requesterRef, { friends: reqFriends }, { merge: true });
       }
@@ -2015,65 +2101,87 @@ const searchGiphy = async (searchTerm: string) => {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPreviewUploadUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImageFile(file, 800, 800, 0.8);
+        setPreviewUploadUrl(compressed);
+      } catch (err) {
+        console.error(err);
+      }
     }
   };
 
-  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setUserAvatarUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImageFile(file, 400, 400, 0.82);
+        setUserAvatarUrl(compressed);
+      } catch (err) {
+        console.error(err);
+      }
     }
   };
 
-  const handleBannerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBannerFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setUserCardBannerUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImageFile(file, 900, 350, 0.82);
+        setUserCardBannerUrl(compressed);
+      } catch (err) {
+        console.error(err);
+      }
     }
   };
 
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    requireAuth(() => {
-      if (!uploadGroup || !uploadCaption.trim()) return;
-      const finalImage = previewUploadUrl || "https://images.unsplash.com/photo-1511632765486-a01980e01a18?auto=format&fit=crop&w=800&q=80";
-      const newPhoto: GalleryPhoto = { id: Date.now().toString(), groupId: "custom", groupName: uploadGroup, imageUrl: finalImage, caption: uploadCaption, uploadedBy: userName, date: new Date().toLocaleDateString() };
-      setPhotos([newPhoto, ...photos]);
-      setIsUploadOpen(false); setUploadCaption(""); setPreviewUploadUrl(null);
-      setNotification("Photo uploaded successfully to Event Gallery!");
+    requireAuth(async () => {
+      if (!uploadGroup || !uploadCaption.trim() || !previewUploadUrl) {
+        setNotification("⚠️ Please select a photo, group, and caption.");
+        return;
+      }
+      try {
+        await addDoc(collection(db, "gallery_photos"), {
+          groupId: "custom",
+          groupName: uploadGroup,
+          imageUrl: previewUploadUrl,
+          caption: uploadCaption.trim(),
+          uploadedBy: userName,
+          date: new Date().toLocaleDateString(),
+          timestamp: Date.now()
+        });
+        setIsUploadOpen(false);
+        setUploadCaption("");
+        setPreviewUploadUrl(null);
+        setNotification("📸 Photo uploaded to the cloud Event Gallery!");
+      } catch (err) {
+        console.error("Error uploading photo:", err);
+        setNotification("❌ Failed to upload photo to cloud.");
+      }
     });
   };
 
-  const handleReviewSubmit = (e: React.FormEvent) => {
+  const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reviewText.trim()) return;
-    const newRev: Review = {
-      id: Date.now().toString(),
-      userName: userName || "Neighbor",
-      rating: reviewRating,
-      text: reviewText.trim(),
-      date: new Date().toLocaleDateString()
-    };
-    setReviews([newRev, ...reviews]);
-    setIsReviewOpen(false);
-    setReviewText("");
-    setNotification("Thank you for your feedback! Review published.");
+    try {
+      await addDoc(collection(db, "reviews"), {
+        userName: userName || "Neighbor",
+        rating: reviewRating,
+        text: reviewText.trim(),
+        date: new Date().toLocaleDateString(),
+        timestamp: Date.now()
+      });
+      setIsReviewOpen(false);
+      setReviewText("");
+      setNotification("⭐ Thank you! Your review is now live in the cloud.");
+    } catch (err) {
+      console.error("Error publishing review:", err);
+    }
   };
 
   const handleSuggestSubmit = (e: React.FormEvent) => {
@@ -2088,18 +2196,64 @@ const searchGiphy = async (searchTerm: string) => {
     e.preventDefault();
     const mailtoUrl = `mailto:contactzipgroups@gmail.com?subject=🚨%20CHAT%20REPORT%20[Severity:%20${encodeURIComponent(reportSeverity)}]&body=Names%20Involved:%20${encodeURIComponent(reportNames)}%0D%0ASeverity:%20${encodeURIComponent(reportSeverity)}%0D%0ADetails:%20${encodeURIComponent(reportDetails)}`;
     window.location.href = mailtoUrl;
-    setNotification("🚨 Report dispatched to Administrator email and message queue successfully!");
+    setNotification("🚨 Report dispatched to Administrator email queue!");
     setIsReportChatOpen(false);
     setReportNames(""); setReportDetails("");
   };
 
-  // ==========================================
+// ==========================================
   // 7. RENDER JSX
   // ==========================================
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-4 md:p-8 bg-[#0b0f19] text-gray-200 font-sans overflow-x-hidden relative">
       
-      {/* FLOATING NOTIFICATION BANNER (Bouncing Removed) */}
+      {/* UNVERIFIED USER GATE / BOT BLOCKER */}
+      {isLoggedIn && !isEmailVerified ? (
+        <div className="w-full max-w-xl my-auto py-16 px-6">
+          <div className="bg-[#111827] border border-cyan-500/50 rounded-3xl p-8 shadow-2xl text-center">
+            <span className="text-4xl mb-3 inline-block">🔒</span>
+            <h2 className="text-2xl font-black text-white mb-2">Verify Your Email to Access Zip Groups</h2>
+            <p className="text-xs text-gray-300 mb-6 leading-relaxed">
+              To maintain a safe neighborhood platform, please enter the 6-digit verification code sent to <strong className="text-amber-400">{userEmail || emailSignupInput}</strong> before accessing circles, chat, or features.
+            </p>
+
+            <div className="flex flex-col gap-4">
+              <input
+                type="text"
+                maxLength={6}
+                placeholder="123456"
+                value={verificationCodeInput}
+                onChange={(e) => setVerificationCodeInput(e.target.value)}
+                className="w-full text-center text-3xl font-mono font-black tracking-widest bg-black border border-gray-700 rounded-2xl py-3.5 text-amber-300 focus:outline-none focus:border-cyan-400 shadow-inner"
+              />
+              <button
+                onClick={handleConfirmVerificationCode}
+                className="w-full py-3.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:opacity-90 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all cursor-pointer"
+              >
+                Confirm Verification Code
+              </button>
+              <div className="flex justify-between items-center text-xs mt-2 px-1">
+                <button
+                  onClick={handleSendVerificationEmail}
+                  disabled={isSendingCode}
+                  className="text-cyan-400 hover:underline cursor-pointer font-bold"
+                >
+                  {isSendingCode ? "Sending Code..." : "Resend 6-Digit Code"}
+                </button>
+                <button
+                  onClick={wipeLocalStateAndLogout}
+                  className="text-rose-400 hover:underline cursor-pointer font-bold"
+                >
+                  Log Out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+      
+      {/* FLOATING NOTIFICATION BANNER */}
       {notification && (
         <div className="fixed bottom-6 right-6 z-[300] bg-cyan-950/95 border border-cyan-500 text-cyan-200 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 backdrop-blur-md">
           <span>✨ {notification}</span>
@@ -2107,7 +2261,7 @@ const searchGiphy = async (searchTerm: string) => {
         </div>
       )}
 
-      {/* REORGANIZED NAVIGATION HEADER */}
+      {/* NAVIGATION HEADER */}
       <header className="w-full max-w-6xl flex justify-between items-center py-4 border-b border-gray-800/60 z-[100] flex-wrap gap-4 relative">
         <div onClick={handleReset} className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-500 bg-clip-text text-transparent cursor-pointer">
           Zip Groups
@@ -2139,10 +2293,17 @@ const searchGiphy = async (searchTerm: string) => {
             onClick={() => {
               requireAuth(() => {
                 if (!safetyActive) {
+                  if (!emergencyContactEmail.trim() && !emergencyContactPhone.trim()) {
+                    setNotification("⚠️ Please set your Emergency Contact in Account Settings first!");
+                    setIsAccountSettingsOpen(true);
+                    return;
+                  }
                   setSafetyActive(true);
                   setSafetyStep("active");
+                  setNotification(`🛡️ Safety Mode ON: Checking in every ${safetyIntervalHours} hour(s).`);
                 } else {
                   setSafetyActive(false);
+                  setSafetyPromptDue(false);
                   setNotification("🛡️ Safety Mode turned OFF.");
                 }
               });
@@ -2174,15 +2335,12 @@ const searchGiphy = async (searchTerm: string) => {
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
               >
                 {userAvatarUrl ? (
-  <img src={userAvatarUrl} alt="Your Selfie" className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-400 shadow-md shrink-0" />
-) : (
-  <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-lg font-black text-white shadow-inner shrink-0">
-    {userInitials}
-  </div>
-)}
+                  <img src={userAvatarUrl} alt="Avatar" className="w-5 h-5 rounded-full object-cover border border-emerald-400" />
+                ) : (
+                  <span className="w-5 h-5 rounded-full bg-cyan-800 text-cyan-200 text-[10px] flex items-center justify-center font-bold">{userInitials}</span>
+                )}
                 <span>{userName}</span> {(userHostedEvents > 0 || userName.toLowerCase() === "heather") ? '👑' : ''}
                 
-                {/* RED NOTIFICATION DOT ON TOP-RIGHT PROFILE BUTTON */}
                 {unreadCount > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center shadow-[0_0_10px_rgba(225,29,72,0.9)] animate-pulse">
                     {unreadCount}
@@ -2259,11 +2417,7 @@ const searchGiphy = async (searchTerm: string) => {
                   <button 
                     onClick={() => {
                       if (window.confirm("Are you sure you want to log out?")) {
-                        localStorage.clear();
-                        setIsLoggedIn(false);
-                        setUserName("");
-                        setIsProfileOpen(false);
-                        window.location.href = "/";
+                        wipeLocalStateAndLogout();
                       }
                     }} 
                     className="w-full text-left px-4 py-2.5 text-xs text-rose-500 font-bold bg-rose-950/30 hover:bg-rose-900/60 transition-colors border-t border-gray-800 cursor-pointer"
@@ -2277,24 +2431,25 @@ const searchGiphy = async (searchTerm: string) => {
         </nav>
       </header>
 
-      {/* SOFT EMAIL VERIFICATION BANNER */}
+      {/* REAL EMAIL VERIFICATION BANNER */}
       {isLoggedIn && !isEmailVerified && (
         <div className="w-full max-w-6xl mt-4 bg-amber-950/40 border border-amber-500/40 px-5 py-3 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs z-20">
           <div className="flex items-center gap-2 text-amber-200">
             <span>⚠️</span>
-            <span>Your email address ({userEmail || emailSignupInput || "unverified"}) is not verified. Verify to unlock event hosting and direct messaging!</span>
+            <span>Your email address ({userEmail || emailSignupInput || "unverified"}) is not verified. Click here to send a verification email and to get your code</span>
           </div>
           <button 
             onClick={handleSendVerificationEmail} 
-            className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition-colors cursor-pointer shrink-0"
+            disabled={isSendingCode}
+            className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition-colors cursor-pointer shrink-0 disabled:opacity-50"
           >
-            Verify Email Now
+            {isSendingCode ? "Sending Code..." : "Send Email Now"}
           </button>
         </div>
       )}
 
-      {/* --- PINNED HOST HQ PORTAL BANNER --- */}
-      {userHostedEvents > 0 && !selectedGroup && !hasSearched && !isFriendsView && !isGalleryView && !isShopView && !isVenuesView && !isSavedView && !isMessagesView && !isHeatmapView && (
+      {/* PINNED HOST HQ PORTAL BANNER */}
+      {(userHostedEvents > 0 || isSubscribedHost || userName.toLowerCase() === "heather") && isLoggedIn && !selectedGroup && !hasSearched && !isFriendsView && !isGalleryView && !isShopView && !isVenuesView && !isSavedView && !isMessagesView && !isHeatmapView && (
         <div className="w-full max-w-6xl mt-6 bg-gradient-to-r from-amber-950 via-gray-900 to-black border border-amber-500/60 rounded-2xl p-4 shadow-[0_0_20px_rgba(245,158,11,0.25)] flex flex-col sm:flex-row items-center justify-between gap-4 cursor-pointer hover:border-amber-400 transition-all z-10" onClick={() => setSelectedGroup(HOST_HQ_GROUP)}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-900/60 flex items-center justify-center text-2xl border border-amber-500/40">👑</div>
@@ -2312,17 +2467,32 @@ const searchGiphy = async (searchTerm: string) => {
 
       {/* ACTIVE SAFETY CHECK-IN WIDGET */}
       {safetyActive && safetyStep === "active" && (
-        <div className="fixed bottom-20 right-6 z-[280] bg-emerald-950/95 border border-emerald-500 text-emerald-100 p-5 rounded-3xl shadow-2xl max-w-sm backdrop-blur-md flex flex-col gap-3">
+        <div className={`fixed bottom-20 right-6 z-[280] ${safetyPromptDue ? 'bg-rose-950/95 border-rose-500 animate-pulse' : 'bg-emerald-950/95 border-emerald-500'} border text-emerald-100 p-5 rounded-3xl shadow-2xl max-w-sm backdrop-blur-md flex flex-col gap-3`}>
           <div className="flex justify-between items-center">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">🛡️ Safety Monitor Active</span>
-            <button onClick={() => setSafetyActive(false)} className="text-gray-400 hover:text-white font-bold text-sm cursor-pointer">&times;</button>
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+              🛡️ {safetyPromptDue ? `CHECK-IN DUE (${Math.floor(safetyGraceSeconds / 60)}m ${safetyGraceSeconds % 60}s left)` : "Safety Monitor Active"}
+            </span>
+            <button onClick={() => { setSafetyActive(false); setSafetyPromptDue(false); }} className="text-gray-400 hover:text-white font-bold text-sm cursor-pointer">&times;</button>
           </div>
           <p className="text-xs text-gray-300 leading-relaxed">
-            Timer set. Every {safetyIntervalHours} hour(s), we'll ask if you are home safely. If no response within 10 minutes, <strong>{emergencyContactName || "your emergency contact"}</strong> will be alerted.
+            Every {safetyIntervalHours} hour(s), we ask if you are safe. If unconfirmed within 10 minutes, <strong>{emergencyContactName || "your emergency contact"}</strong> ({emergencyContactPhone || emergencyContactEmail}) will automatically receive your GPS emergency alert via SMS & Email.
           </p>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-gray-400">Check-in every:</span>
+            <select
+              value={safetyIntervalHours}
+              onChange={(e) => setSafetyIntervalHours(Number(e.target.value))}
+              className="bg-black border border-gray-700 rounded-lg px-2 py-1 text-white text-xs"
+            >
+              <option value={1}>1 Hour</option>
+              <option value={2}>2 Hours</option>
+              <option value={3}>3 Hours</option>
+              <option value={4}>4 Hours</option>
+            </select>
+          </div>
           <div className="flex gap-2 mt-1">
-            <button onClick={() => setNotification("✅ Checked in: I'm home safely!")} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer">I'm Home Safely</button>
-            <button onClick={() => setNotification("🔄 Still at event timer reset.")} className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl cursor-pointer">Still at Event</button>
+            <button onClick={() => { setSafetyActive(false); setSafetyPromptDue(false); setNotification("✅ Checked in: Glad you are home safely! Safety timer turned off."); }} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer">I&apos;m Home Safely</button>
+            <button onClick={() => { setSafetyPromptDue(false); setSafetyGraceSeconds(600); setNotification(`🔄 Safety timer reset for another ${safetyIntervalHours} hour(s).`); }} className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl cursor-pointer">Still at Event</button>
           </div>
         </div>
       )}
@@ -2333,7 +2503,7 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="flex justify-between items-center mb-8 bg-[#111827] p-6 rounded-2xl border border-gray-800">
             <div>
               <h3 className="text-2xl font-black text-white">🗺️ Interactive Neighborhood HotSpots</h3>
-              <p className="text-sm text-gray-400 mt-1">Live city radar showing where social activity is spiking right now.</p>
+              <p className="text-sm text-gray-400 mt-1">Explore active zip codes and live community chapters.</p>
             </div>
             <button onClick={handleReset} className="px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-sm rounded-xl border border-gray-700 transition-all cursor-pointer">&larr; Back to Home</button>
           </div>
@@ -2341,12 +2511,12 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-16">
             <div className="bg-[#111827] border border-amber-500/40 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
               <div>
-                <span className="text-[10px] uppercase font-bold text-amber-400 bg-amber-950/80 px-2.5 py-0.5 rounded-full border border-amber-800">🔥 Hotspot #1</span>
+                <span className="text-[10px] uppercase font-bold text-amber-400 bg-amber-950/80 px-2.5 py-0.5 rounded-full border border-amber-800">🔥 Featured Hub #1</span>
                 <h4 className="text-xl font-bold text-white mt-3 mb-1">Zip Code 43230 (Gahanna)</h4>
-                <p className="text-xs text-gray-400 mb-4">High concentration of game nights, cafes, and thrifting.</p>
+                <p className="text-xs text-gray-400 mb-4">Game nights, cafes, local parks, and thrifting circles.</p>
                 <div className="bg-black/40 p-3 rounded-xl border border-gray-800 space-y-2 text-xs">
-                  <p className="text-emerald-400 font-bold">● 14 Active Meetups Tonight</p>
-                  <p className="text-cyan-300">● 180+ Check-ins in past 3 hours</p>
+                  <p className="text-emerald-400 font-bold">● 30 Community Circles Available</p>
+                  <p className="text-cyan-300">● {cloudEvents.filter(e => e.zipCode === "43230").length} Scheduled Gatherings</p>
                 </div>
               </div>
               <button onClick={() => { setZipCode("43230"); setHasSearched(true); setIsHeatmapView(false); }} className="mt-6 w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl cursor-pointer">Explore Zip 43230 &rarr;</button>
@@ -2354,12 +2524,12 @@ const searchGiphy = async (searchTerm: string) => {
 
             <div className="bg-[#111827] border border-cyan-500/40 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
               <div>
-                <span className="text-[10px] uppercase font-bold text-cyan-400 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-800">⚡ Hotspot #2</span>
+                <span className="text-[10px] uppercase font-bold text-cyan-400 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-800">⚡ Featured Hub #2</span>
                 <h4 className="text-xl font-bold text-white mt-3 mb-1">Zip Code 43215 (Downtown)</h4>
-                <p className="text-xs text-gray-400 mb-4">Popular for barcades, trivia nights, and singles mixers.</p>
+                <p className="text-xs text-gray-400 mb-4">Barcades, trivia nights, foodies, and singles mixers.</p>
                 <div className="bg-black/40 p-3 rounded-xl border border-gray-800 space-y-2 text-xs">
-                  <p className="text-emerald-400 font-bold">● 9 Active Meetups Tonight</p>
-                  <p className="text-cyan-300">● 120+ Check-ins in past 3 hours</p>
+                  <p className="text-emerald-400 font-bold">● 30 Community Circles Available</p>
+                  <p className="text-cyan-300">● {cloudEvents.filter(e => e.zipCode === "43215").length} Scheduled Gatherings</p>
                 </div>
               </div>
               <button onClick={() => { setZipCode("43215"); setHasSearched(true); setIsHeatmapView(false); }} className="mt-6 w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl cursor-pointer">Explore Zip 43215 &rarr;</button>
@@ -2367,12 +2537,12 @@ const searchGiphy = async (searchTerm: string) => {
 
             <div className="bg-[#111827] border border-purple-500/40 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
               <div>
-                <span className="text-[10px] uppercase font-bold text-purple-400 bg-purple-950/80 px-2.5 py-0.5 rounded-full border border-purple-800">🌟 Hotspot #3</span>
+                <span className="text-[10px] uppercase font-bold text-purple-400 bg-purple-950/80 px-2.5 py-0.5 rounded-full border border-purple-800">🌟 Featured Hub #3</span>
                 <h4 className="text-xl font-bold text-white mt-3 mb-1">Zip Code 43214 (Clintonville)</h4>
                 <p className="text-xs text-gray-400 mb-4">Thrifting runs, book clubs, and outdoor park circles.</p>
                 <div className="bg-black/40 p-3 rounded-xl border border-gray-800 space-y-2 text-xs">
-                  <p className="text-emerald-400 font-bold">● 8 Active Meetups Tonight</p>
-                  <p className="text-cyan-300">● 95+ Check-ins in past 3 hours</p>
+                  <p className="text-emerald-400 font-bold">● 30 Community Circles Available</p>
+                  <p className="text-cyan-300">● {cloudEvents.filter(e => e.zipCode === "43214").length} Scheduled Gatherings</p>
                 </div>
               </div>
               <button onClick={() => { setZipCode("43214"); setHasSearched(true); setIsHeatmapView(false); }} className="mt-6 w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl cursor-pointer">Explore Zip 43214 &rarr;</button>
@@ -2385,7 +2555,7 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="flex justify-between items-center mb-8 bg-[#111827] p-6 rounded-2xl border border-gray-800">
             <div>
               <h3 className="text-2xl font-black text-white">Zip Messages Inbox</h3>
-              <p className="text-sm text-gray-400 mt-1">Direct communications with neighbors and reports queue.</p>
+              <p className="text-sm text-gray-400 mt-1">Direct cloud-synced communications with neighbors.</p>
             </div>
             <button onClick={handleReset} className="px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-sm rounded-xl border border-gray-700 transition-all cursor-pointer">&larr; Back to Home</button>
           </div>
@@ -2394,8 +2564,12 @@ const searchGiphy = async (searchTerm: string) => {
             <div className="bg-[#111827] border border-gray-800 rounded-2xl p-4 flex flex-col gap-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2">Conversations</h4>
               {friendsList.map(f => (
-                <div key={f.id} onClick={() => setActivePM(f)} className="p-3 bg-gray-900 hover:bg-gray-800 rounded-xl border border-gray-800 cursor-pointer flex items-center gap-3 transition-colors">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white ${f.avatarColor}`}>{f.avatarInitials}</div>
+                <div key={f.id} onClick={() => setActivePM(f)} className={`p-3 rounded-xl border cursor-pointer flex items-center gap-3 transition-colors ${activePM?.name === f.name ? 'bg-gray-800 border-cyan-500/50' : 'bg-gray-900 hover:bg-gray-800 border-gray-800'}`}>
+                  {f.avatarUrl ? (
+                    <img src={f.avatarUrl} alt={f.name} className="w-10 h-10 rounded-xl object-cover border border-cyan-500/40" />
+                  ) : (
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white ${f.avatarColor}`}>{f.avatarInitials}</div>
+                  )}
                   <div className="flex-1 truncate">
                     <p className="text-xs font-bold text-white">{f.name}</p>
                     <p className="text-[10px] text-cyan-400 truncate">{f.handle}</p>
@@ -2409,13 +2583,17 @@ const searchGiphy = async (searchTerm: string) => {
                 <>
                   <div className="border-b border-gray-800 pb-4 mb-4 flex justify-between items-center">
                     <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white ${activePM.avatarColor}`}>{activePM.avatarInitials}</div>
+                      {activePM.avatarUrl ? (
+                        <img src={activePM.avatarUrl} alt={activePM.name} className="w-10 h-10 rounded-xl object-cover border border-cyan-500/40" />
+                      ) : (
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white ${activePM.avatarColor || 'bg-cyan-700'}`}>{activePM.avatarInitials || activePM.name.slice(0, 2).toUpperCase()}</div>
+                      )}
                       <div>
                         <h4 className="text-sm font-bold text-white">{activePM.name}</h4>
-                        <p className="text-[10px] text-cyan-400">{activePM.status}</p>
+                        <p className="text-[10px] text-cyan-400">{activePM.status || "Online"}</p>
                       </div>
                     </div>
-                    {!activePM.isBot && <button onClick={() => handleBlockUser(activePM.id)} className="text-[10px] text-rose-400 bg-rose-950/40 px-2 py-1 rounded border border-rose-900/50">Block User</button>}
+                    {!activePM.isBot && <button onClick={() => handleBlockUser(activePM.id)} className="text-[10px] text-rose-400 bg-rose-950/40 px-2 py-1 rounded border border-rose-900/50 cursor-pointer">Block User</button>}
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-3 bg-black/40 rounded-xl border border-gray-800 mb-4 flex flex-col gap-2 custom-scrollbar">
@@ -2453,236 +2631,244 @@ const searchGiphy = async (searchTerm: string) => {
                       onKeyDown={(e) => { if(e.key === 'Enter') handleSendPM(); }}
                       className="flex-1 bg-black border border-gray-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500" 
                     />
-                    <button onClick={handleSendPM} className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl">Send</button>
+                    <button onClick={handleSendPM} className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl cursor-pointer">Send</button>
                   </div>
                 </>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
-                <span className="text-4xl mb-2">💬</span>
-                <p className="text-sm">Select a conversation on the left to start messaging.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    ) : isFriendsView ? (
-          <div className="w-full max-w-4xl my-auto py-8">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center gap-2">
-                  <span>👥</span> Zip Friends & Community
-                </h2>
-                <p className="text-xs text-gray-400 mt-1">Connect with neighbors, chat privately, and view local community profiles.</p>
-              </div>
-              <button 
-                onClick={() => setIsFriendsView(false)}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer"
-              >
-                &larr; Back to Map
-              </button>
-            </div>
-
-            {/* ADD FRIEND / PENDING REQUESTS BAR */}
-            <div className="bg-[#111827] border border-gray-800 rounded-2xl p-4 mb-6 shadow-xl flex flex-col md:flex-row gap-3 items-center justify-between">
-              <div className="flex items-center gap-2 w-full md:w-auto flex-1">
-                <input 
-                  type="text" 
-                  placeholder="Enter neighbor username to add..." 
-                  value={friendSearchInput}
-                  onChange={(e) => setFriendSearchInput(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500"
-                />
-                <button 
-                  onClick={handleSendFriendRequest}
-                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shrink-0"
-                >
-                  Add Friend
-                </button>
-              </div>
-
-              {friendRequests.length > 0 && (
-                <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto">
-                  <span className="text-[10px] text-amber-400 font-bold shrink-0">Requests:</span>
-                  {friendRequests.map((req, idx) => (
-                    <div key={idx} className="flex items-center gap-1 bg-amber-950/40 border border-amber-800/60 px-2.5 py-1 rounded-xl shrink-0">
-                      <span className="text-xs text-white font-bold">{req}</span>
-                      <button onClick={() => handleAcceptRequest(req)} className="text-emerald-400 font-bold px-1 hover:text-emerald-300 cursor-pointer" title="Accept">✓</button>
-                      <button onClick={() => handleDenyRequest(req)} className="text-rose-400 font-bold px-1 hover:text-rose-300 cursor-pointer" title="Deny">&times;</button>
-                    </div>
-                  ))}
+                  <span className="text-4xl mb-2">💬</span>
+                  <p className="text-sm">Select a conversation on the left to start messaging.</p>
                 </div>
               )}
             </div>
+          </div>
+        </div>
 
-            {/* FRIENDS & PROFILE CARDS GRID */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      ) : isFriendsView ? (
+        <div className="w-full max-w-4xl my-auto py-8">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h2 className="text-2xl font-black text-white flex items-center gap-2">
+                <span>👥</span> Zip Friends & Community
+              </h2>
+              <p className="text-xs text-gray-400 mt-1">Connect with neighbors, chat privately, and view live cloud profiles.</p>
+            </div>
+            <button 
+              onClick={() => setIsFriendsView(false)}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer"
+            >
+              &larr; Back to Map
+            </button>
+          </div>
 
-              {/* CURRENT USER'S OWN FRIEND CARD */}
-              {isLoggedIn && (
-                <div className={`flex flex-col justify-between p-5 bg-gradient-to-b ${userCardThemeGradient} rounded-3xl border border-amber-500/60 shadow-[0_0_20px_rgba(245,158,11,0.25)] relative overflow-hidden`}>
-                  
-                  {/* TOP RIGHT AGE BADGE */}
-                  <div className="absolute top-4 right-4 flex flex-col items-end gap-1 z-20">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-400 border border-amber-800/80 shadow-sm">
-                      Zip Friend
-                    </span>
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shadow-sm ${
-                      ageCategory === "Teen 13+" 
-                        ? "bg-purple-950/80 text-purple-300 border border-purple-800/80" 
-                        : "bg-cyan-950/80 text-cyan-300 border border-cyan-800/80"
-                    }`}>
-                      {ageCategory || "Adult 18+"}
-                    </span>
+          {/* ADD FRIEND / PENDING REQUESTS BAR */}
+          <div className="bg-[#111827] border border-gray-800 rounded-2xl p-4 mb-6 shadow-xl flex flex-col md:flex-row gap-3 items-center justify-between">
+            <div className="flex items-center gap-2 w-full md:w-auto flex-1">
+              <input 
+                type="text" 
+                placeholder="Enter neighbor username to add..." 
+                value={friendSearchInput}
+                onChange={(e) => setFriendSearchInput(e.target.value)}
+                className="flex-1 px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500"
+              />
+              <button 
+                onClick={handleSendFriendRequest}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shrink-0"
+              >
+                Add Friend
+              </button>
+            </div>
+
+            {friendRequests.length > 0 && (
+              <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto">
+                <span className="text-[10px] text-amber-400 font-bold shrink-0">Requests:</span>
+                {friendRequests.map((req, idx) => (
+                  <div key={idx} className="flex items-center gap-1 bg-amber-950/40 border border-amber-800/60 px-2.5 py-1 rounded-xl shrink-0">
+                    <span className="text-xs text-white font-bold">{req}</span>
+                    <button onClick={() => handleAcceptRequest(req)} className="text-emerald-400 font-bold px-1 hover:text-emerald-300 cursor-pointer" title="Accept">✓</button>
+                    <button onClick={() => handleDenyRequest(req)} className="text-rose-400 font-bold px-1 hover:text-rose-300 cursor-pointer" title="Deny">&times;</button>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-                  {userCardBannerUrl && (
-  <div className="absolute top-0 left-0 right-0 h-20 overflow-hidden opacity-40 z-0">
-    <img src={userCardBannerUrl} alt="Card Banner" className="w-full h-full object-cover" />
-  </div>
-)}
-                  
-                  <div className="flex items-center gap-4 mb-4 mt-2 relative z-10">
-                    {userAvatarUrl ? (
-                      <img src={userAvatarUrl} alt="Your Selfie" className="w-14 h-14 rounded-2xl object-cover border-2 border-amber-400 shadow-md shrink-0" />
-                    ) : (
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-lg font-black text-white shadow-inner shrink-0">
-                        {userInitials}
-                      </div>
-                    )}
-                    <div className="truncate">
-                      <h4 className="text-base font-bold text-white leading-tight flex items-center gap-1 truncate">
-                        {userName} {userName.toLowerCase() === "heather" && <span title="Platform Creator">👑</span>}
-                      </h4>
-                      <p className="text-[10px] text-amber-400 font-bold mt-0.5">
-                        {userName.toLowerCase() === "heather" ? "[Zip Groups Creator]" : "[Zip Member]"} &bull; @{userName.toLowerCase()}
-                      </p>
-                      {showEmailPublic && userEmail && <p className="text-[10px] text-gray-300 mt-1 truncate">✉️ {userEmail}</p>}
-                      {showPhonePublic && userPhone && <p className="text-[10px] text-gray-300 mt-0.5 truncate">📞 {userPhone}</p>}
-                      {/* NEW: Display Discord Link on Card */}
-                    {discordLinked && discordInviteUrl && showDiscordOnCard && (
-                      <a 
-                        href={`https://${discordInviteUrl.replace(/^https?:\/\//, '')}`} 
-                        target="_blank" 
+          {/* FRIENDS & PROFILE CARDS GRID */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            {/* CURRENT USER'S OWN FRIEND CARD (WITH LIVE SELFIE, BANNER & DISCORD BADGE) */}
+            {isLoggedIn && (
+              <div className={`flex flex-col justify-between p-5 bg-gradient-to-b ${userCardThemeGradient} rounded-3xl border border-amber-500/60 shadow-[0_0_20px_rgba(245,158,11,0.25)] relative overflow-hidden`}>
+                
+                <div className="absolute top-4 right-4 flex flex-col items-end gap-1 z-20">
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-400 border border-amber-800/80 shadow-sm">
+                    Zip Friend
+                  </span>
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shadow-sm ${
+                    ageCategory === "Teen 13+" 
+                      ? "bg-purple-950/80 text-purple-300 border border-purple-800/80" 
+                      : "bg-cyan-950/80 text-cyan-300 border border-cyan-800/80"
+                  }`}>
+                    {ageCategory || "Adult 18+"}
+                  </span>
+                </div>
+
+                {userCardBannerUrl && (
+                  <div className="absolute top-0 left-0 right-0 h-20 overflow-hidden opacity-40 z-0">
+                    <img src={userCardBannerUrl} alt="Card Banner" className="w-full h-full object-cover" />
+                  </div>
+                )}
+                
+                <div className="flex items-center gap-4 mb-4 mt-2 relative z-10">
+                  {userAvatarUrl ? (
+                    <img src={userAvatarUrl} alt="Your Selfie" className="w-14 h-14 rounded-2xl object-cover border-2 border-amber-400 shadow-md shrink-0" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-lg font-black text-white shadow-inner shrink-0">
+                      {userInitials}
+                    </div>
+                  )}
+                  <div className="truncate">
+                    <h4 className="text-base font-bold text-white leading-tight flex items-center gap-1 truncate">
+                      {userName} {userName.toLowerCase() === "heather" && <span title="Platform Creator">👑</span>}
+                    </h4>
+                    <p className="text-[10px] text-amber-400 font-bold mt-0.5">
+                      {userName.toLowerCase() === "heather" ? "[Zip Groups Creator]" : "[Zip Member]"} &bull; @{userName.toLowerCase()}
+                    </p>
+                    {showEmailPublic && userEmail && <p className="text-[10px] text-gray-300 mt-1 truncate">✉️ {userEmail}</p>}
+                    {showPhonePublic && userPhone && <p className="text-[10px] text-gray-300 mt-0.5 truncate">📞 {userPhone}</p>}
+                    {discordInviteUrl && discordInviteUrl.trim() !== "" && showDiscordOnCard && (
+                      <a
+                        href={formatDiscordHref(discordInviteUrl)}
+                        target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex mt-1.5 text-[10px] bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full font-medium items-center gap-1 hover:bg-indigo-900 transition-colors shadow-sm"
-                        title={discordInviteUrl}
+                        className="mt-1.5 inline-flex items-center gap-1 text-[10px] bg-indigo-950/90 text-indigo-300 border border-indigo-700/80 px-2.5 py-0.5 rounded-full font-bold hover:bg-indigo-900 transition-all shadow-sm"
                       >
-                        🎮 {discordInviteUrl.includes('/users/') ? 'Discord Profile' : 'Discord Server'} ↗
+                        <span>🎮</span> {discordInviteUrl.includes("/users/") || /^\d+$/.test(discordInviteUrl.trim()) ? "Discord Profile" : "Discord Server"} ↗
                       </a>
                     )}
                   </div>
                 </div>
-                                        
-                  <div className="bg-black/60 border border-gray-800 rounded-xl p-2.5 mb-4 flex gap-3 justify-center relative z-10 backdrop-blur-sm">
-                    <div className="text-center" title="Events Hosted">
-                      <p className="text-[10px] text-gray-400 font-bold uppercase">Hosted</p>
-                      <p className="text-sm font-black text-purple-400">{userHostedEvents}</p>
-                    </div>
-                    <div className="w-px bg-gray-700"></div>
-                    <div className="text-center" title="Event Attendance Streak">
-                      <p className="text-[10px] text-gray-400 font-bold uppercase">Streak</p>
-                      <p className="text-sm font-black text-orange-400 flex items-center justify-center gap-0.5">🔥 0</p>
-                    </div>
-                    <div className="w-px bg-gray-700"></div>
-                    <div className="text-center" title="Stellar Member Rating">
-                      <p className="text-[10px] text-gray-400 font-bold uppercase">Stellar</p>
-                      <p className="text-[11px] font-black text-amber-400 mt-0.5">⭐ 0 <span className="text-gray-500 font-medium">(0)</span></p>
-                    </div>
+                  
+                <div className="bg-black/60 border border-gray-800 rounded-xl p-2.5 mb-4 flex gap-3 justify-center relative z-10 backdrop-blur-sm">
+                  <div className="text-center" title="Events Hosted">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase">Hosted</p>
+                    <p className="text-sm font-black text-purple-400">{userHostedEvents}</p>
                   </div>
-
-                  <div className="relative z-10 flex gap-2">
-                    <button 
-                      onClick={() => setIsAccountSettingsOpen(true)}
-                      className="w-full py-2.5 rounded-xl font-bold bg-gray-800 hover:bg-gray-700 text-cyan-400 border border-cyan-500/30 transition-all cursor-pointer text-xs flex items-center justify-center gap-1.5 shadow-md"
-                    >
-                      ⚙️ Edit Profile & Settings
-                    </button>
+                  <div className="w-px bg-gray-700"></div>
+                  <div className="text-center" title="Event Attendance Streak">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase">Streak</p>
+                    <p className="text-sm font-black text-orange-400 flex items-center justify-center gap-0.5">🔥 {userStreak}</p>
+                  </div>
+                  <div className="w-px bg-gray-700"></div>
+                  <div className="text-center" title="Stellar Member Rating">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase">Stellar</p>
+                    <p className="text-[11px] font-black text-amber-400 mt-0.5">⭐ {userStellarRating} <span className="text-gray-500 font-medium">({userStellarReviews})</span></p>
                   </div>
                 </div>
-              )}
 
-              {/* OTHER FRIENDS CARDS */}
-              {friendsList.map((friend) => (
-                <div key={friend.id} className={`flex flex-col justify-between p-5 bg-gradient-to-b ${friend.cardThemeGradient || 'from-purple-900 via-indigo-950 to-black'} rounded-3xl border border-purple-500/40 shadow-xl relative overflow-hidden`}>
-                  
-                  {friend.cardBannerUrl && (
-                    <div className="absolute top-0 left-0 right-0 h-20 overflow-hidden opacity-40 z-0">
-                      <img src={friend.cardBannerUrl} alt="Banner" className="w-full h-full object-cover" />
+                <div className="relative z-10 flex gap-2">
+                  <button 
+                    onClick={() => setIsAccountSettingsOpen(true)}
+                    className="w-full py-2.5 rounded-xl font-bold bg-gray-800 hover:bg-gray-700 text-cyan-400 border border-cyan-500/30 transition-all cursor-pointer text-xs flex items-center justify-center gap-1.5 shadow-md"
+                  >
+                    ⚙️ Edit Profile & Settings
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* OTHER FRIENDS CARDS (WITH LIVE CLOUD SELFIES, BANNERS & DISCORD BADGES) */}
+            {friendsList.map((friend) => (
+              <div key={friend.id} className={`flex flex-col justify-between p-5 bg-gradient-to-b ${friend.cardThemeGradient || 'from-purple-950 via-indigo-950 to-black'} rounded-3xl border border-purple-500/40 shadow-xl relative overflow-hidden`}>
+                
+                {friend.cardBannerUrl && (
+                  <div className="absolute top-0 left-0 right-0 h-20 overflow-hidden opacity-40 z-0">
+                    <img src={friend.cardBannerUrl} alt="Banner" className="w-full h-full object-cover" />
+                  </div>
+                )}
+
+                <div className="absolute top-4 right-4 flex flex-col items-end gap-1 z-10">
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-400 border border-amber-800/80 shadow-sm">
+                    Zip Friend
+                  </span>
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shadow-sm ${
+                    friend.ageCategory === "Teen 13+" 
+                      ? "bg-purple-950/80 text-purple-300 border border-purple-800/80" 
+                      : "bg-cyan-950/80 text-cyan-300 border border-cyan-800/80"
+                  }`}>
+                    {friend.ageCategory || "Adult 18+"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-4 mb-4 mt-2 relative z-10">
+                  {friend.avatarUrl ? (
+                    <img src={friend.avatarUrl} alt={friend.name} className="w-14 h-14 rounded-2xl object-cover border-2 border-purple-400 shadow-md shrink-0" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-lg font-black text-white shadow-inner shrink-0">
+                      {friend.avatarInitials || friend.name.slice(0, 2).toUpperCase()}
                     </div>
                   )}
-
-                  <div className="absolute top-4 right-4 flex flex-col items-end gap-1 z-10">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-400 border border-amber-800/80 shadow-sm">
-                      Zip Friend
-                    </span>
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shadow-sm ${
-                      friend.ageCategory === "Teen 13+" 
-                        ? "bg-purple-950/80 text-purple-300 border border-purple-800/80" 
-                        : "bg-cyan-950/80 text-cyan-300 border border-cyan-800/80"
-                    }`}>
-                      {friend.ageCategory || "Adult 18+"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-4 mb-4 mt-2 relative z-10">
-                    {friend.avatarUrl ? (
-                      <img src={friend.avatarUrl} alt={friend.name} className="w-14 h-14 rounded-2xl object-cover border-2 border-purple-400 shadow-md shrink-0" />
-                    ) : (
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-lg font-black text-white shadow-inner shrink-0">
-                        {friend.avatarInitials || friend.name.slice(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <div className="truncate">
-                      <h4 className="text-base font-bold text-white leading-tight flex items-center gap-1 truncate">
-                        {friend.name} {friend.name.toLowerCase() === 'zip bot' && '🤖'} {friend.name.toLowerCase() === 'heather' && '👑'}
-                      </h4>
-                      <p className="text-[10px] text-purple-300 font-bold mt-0.5">{friend.handle}</p>
-                      {friend.showEmailPublic && friend.email && <p className="text-[10px] text-gray-300 mt-1 truncate">✉️ {friend.email}</p>}
-                      {friend.showPhonePublic && friend.phone && <p className="text-[10px] text-gray-300 mt-0.5 truncate">📞 {friend.phone}</p>}
-                    </div>
-                  </div>
-
-                  <div className="bg-black/60 border border-gray-800 rounded-xl p-2.5 mb-4 flex gap-3 justify-center relative z-10 backdrop-blur-sm">
-                    <div className="text-center">
-                      <p className="text-[10px] text-gray-400 font-bold uppercase">Hosted</p>
-                      <p className="text-sm font-black text-purple-400">{friend.hostedCount || 0}</p>
-                    </div>
-                    <div className="w-px bg-gray-700"></div>
-                    <div className="text-center">
-                      <p className="text-[10px] text-gray-400 font-bold uppercase">Streak</p>
-                      <p className="text-sm font-black text-orange-400 flex items-center justify-center gap-0.5">🔥 {friend.streak || 0}</p>
-                    </div>
-                    <div className="w-px bg-gray-700"></div>
-                    <div className="text-center">
-                      <p className="text-[10px] text-gray-400 font-bold uppercase">Stellar</p>
-                      <p className="text-[11px] font-black text-amber-400 mt-0.5">⭐ {friend.stellarRating || 0} <span className="text-gray-500 font-medium">({friend.stellarReviews || 0})</span></p>
-                    </div>
-                  </div>
-
-                  <div className="relative z-10 flex gap-2">
-                    <button 
-                     onClick={() => { setActivePM({ name: friend.name, isBot: friend.name.toLowerCase() === 'zip bot' } as any); setIsMessagesView(true); }}
-                     className="flex-1 py-2.5 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg hover:opacity-95 transition-all cursor-pointer text-xs flex items-center justify-center gap-1.5"
-                    >
-                   💬 Message
-                      </button>
-                    {friend.name.toLowerCase() !== 'zip bot' && friend.name.toLowerCase() !== 'heather' && (
-                      <button 
-                        onClick={() => handleRemoveFriend(friend.name)}
-                        className="px-3 py-2.5 bg-rose-950/60 hover:bg-rose-900/60 text-rose-400 rounded-xl border border-rose-800/60 text-xs font-bold transition-all cursor-pointer"
-                        title="Remove Friend"
+                  <div className="truncate">
+                    <h4 className="text-base font-bold text-white leading-tight flex items-center gap-1 truncate">
+                      {friend.name} {friend.name.toLowerCase() === 'zip bot' && '🤖'} {friend.name.toLowerCase() === 'heather' && '👑'}
+                    </h4>
+                    <p className="text-[10px] text-purple-300 font-bold mt-0.5">{friend.handle}</p>
+                    {friend.showEmailPublic && friend.email && <p className="text-[10px] text-gray-300 mt-1 truncate">✉️ {friend.email}</p>}
+                    {friend.showPhonePublic && friend.phone && <p className="text-[10px] text-gray-300 mt-0.5 truncate">📞 {friend.phone}</p>}
+                    {friend.discordInviteUrl && friend.discordInviteUrl.trim() !== "" && (friend.showDiscordOnCard !== false) && (
+                      <a
+                        href={formatDiscordHref(friend.discordInviteUrl)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1.5 inline-flex items-center gap-1 text-[10px] bg-indigo-950/90 text-indigo-300 border border-indigo-700/80 px-2.5 py-0.5 rounded-full font-bold hover:bg-indigo-900 transition-all shadow-sm"
                       >
-                        Remove
-                      </button>
+                        <span>🎮</span> {friend.discordInviteUrl.includes("/users/") || /^\d+$/.test(friend.discordInviteUrl.trim()) ? "Discord Profile" : "Discord Server"} ↗
+                      </a>
                     )}
                   </div>
                 </div>
-              ))}
 
-            </div>
+                <div className="bg-black/60 border border-gray-800 rounded-xl p-2.5 mb-4 flex gap-3 justify-center relative z-10 backdrop-blur-sm">
+                  <div className="text-center">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase">Hosted</p>
+                    <p className="text-sm font-black text-purple-400">{friend.hostedCount || 0}</p>
+                  </div>
+                  <div className="w-px bg-gray-700"></div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase">Streak</p>
+                    <p className="text-sm font-black text-orange-400 flex items-center justify-center gap-0.5">🔥 {friend.streak || 0}</p>
+                  </div>
+                  <div className="w-px bg-gray-700"></div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase">Stellar</p>
+                    <p className="text-[11px] font-black text-amber-400 mt-0.5">⭐ {friend.stellarRating || 0} <span className="text-gray-500 font-medium">({friend.stellarReviews || 0})</span></p>
+                  </div>
+                </div>
+
+                <div className="relative z-10 flex gap-2">
+                  <button 
+                    onClick={() => { setActivePM(friend); setIsMessagesView(true); setIsFriendsView(false); }}
+                    className="flex-1 py-2.5 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg hover:opacity-95 transition-all cursor-pointer text-xs flex items-center justify-center gap-1.5"
+                  >
+                    💬 Message
+                  </button>
+                  {friend.name.toLowerCase() !== 'zip bot' && friend.name.toLowerCase() !== 'heather' && (
+                    <button 
+                      onClick={() => handleRemoveFriend(friend.name)}
+                      className="px-3 py-2.5 bg-rose-950/60 hover:bg-rose-900/60 text-rose-400 rounded-xl border border-rose-800/60 text-xs font-bold transition-all cursor-pointer"
+                      title="Remove Friend"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
           </div>
-        ) : isVenuesView ? (
-      
+        </div>
+
+      ) : isVenuesView ? (
         <div className="w-full max-w-6xl my-auto py-8">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 bg-[#111827] p-8 rounded-3xl border border-amber-500/30 shadow-2xl relative overflow-hidden">
             <div className="relative z-10 max-w-2xl">
@@ -2747,7 +2933,6 @@ const searchGiphy = async (searchTerm: string) => {
             </div>
           </div>
 
-          {/* HOST STARTER KIT LOYALTY & DIRECT BUY SPOTLIGHT */}
           <div className="mb-8 w-full bg-gradient-to-r from-purple-950/70 via-[#111827] to-cyan-950/70 p-6 rounded-3xl border border-purple-500/40 shadow-xl flex flex-col lg:flex-row items-center justify-between gap-6">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
@@ -2904,7 +3089,7 @@ const searchGiphy = async (searchTerm: string) => {
                           </div>
                           <div className="flex flex-col items-end gap-2 ml-2">
                             <span className="text-sm font-bold text-amber-400">${item.price * item.quantity}.00</span>
-                            <button onClick={() => setCart(cart.filter(i => i.cartId !== item.cartId))} className="text-rose-400 hover:text-rose-300 text-[10px] font-bold px-2 py-1 bg-rose-950/40 rounded border border-rose-900 transition-colors">Remove</button>
+                            <button onClick={() => setCart(cart.filter(i => i.cartId !== item.cartId))} className="text-rose-400 hover:text-rose-300 text-[10px] font-bold px-2 py-1 bg-rose-950/40 rounded border border-rose-900 transition-colors cursor-pointer">Remove</button>
                           </div>
                         </div>
                       ))}
@@ -2942,30 +3127,44 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 bg-[#111827] p-6 rounded-2xl border border-gray-800">
             <div>
               <h3 className="text-2xl font-black text-white">Event Gallery</h3>
-              <p className="text-sm text-gray-400 mt-1">Local moments captured and shared by the neighborhood.</p>
+              <p className="text-sm text-gray-400 mt-1">Real local moments captured and shared in the cloud by the neighborhood.</p>
             </div>
             <div className="flex gap-3 w-full md:w-auto">
-              <button onClick={() => requireAuth(() => setIsUploadOpen(true))} className="flex-1 md:flex-none px-5 py-2.5 bg-pink-600 hover:bg-pink-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-md">+ Upload Photos</button>
+              {(userHostedEvents > 0 || userName.toLowerCase() === "heather") ? (
+                <button onClick={() => requireAuth(() => setIsUploadOpen(true))} className="flex-1 md:flex-none px-5 py-2.5 bg-pink-600 hover:bg-pink-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-md">+ Upload Photos</button>
+              ) : (
+                <span className="text-xs text-amber-400 bg-amber-950/60 border border-amber-800/60 px-4 py-2 rounded-xl font-bold flex items-center gap-1.5">
+                  👑 Gallery Uploads Reserved for Hosts
+                </span>
+              )}
               <button onClick={handleReset} className="flex-1 md:flex-none px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-sm rounded-xl border border-gray-700 transition-all cursor-pointer">&larr; Home</button>
             </div>
           </div>
-          <div className="columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6 pb-16">
-            {photos.map(photo => (
-              <div key={photo.id} className="break-inside-avoid bg-[#111827] border border-gray-800 rounded-3xl overflow-hidden shadow-xl hover:border-pink-500/50 transition-all group">
-                <div className="w-full aspect-square relative bg-gray-900 flex items-center justify-center overflow-hidden">
-                  <Image src={photo.imageUrl} alt={photo.caption} fill className="object-cover group-hover:scale-105 transition-transform duration-500" unoptimized />
-                </div>
-                <div className="p-5 relative bg-[#111827] z-10">
-                  <span className="text-[10px] uppercase tracking-widest font-bold text-pink-400 bg-pink-950/50 px-2 py-0.5 rounded-full border border-pink-800/50 mb-2 inline-block">{photo.groupName}</span>
-                  <p className="text-sm text-gray-200 font-medium mb-3">"{photo.caption}"</p>
-                  <div className="flex justify-between items-center border-t border-gray-800/80 pt-3">
-                    <p className="text-[10px] text-gray-500 font-semibold text-pink-300/80">📸 {photo.uploadedBy}</p>
-                    <p className="text-[10px] text-gray-500">{photo.date}</p>
+          {photos.length === 0 ? (
+            <div className="bg-[#111827] border border-gray-800 rounded-3xl p-12 text-center text-gray-400">
+              <p className="text-3xl mb-2">📸</p>
+              <p className="text-sm font-bold text-white">No event photos uploaded yet.</p>
+              <p className="text-xs text-gray-500 mt-1">Be the first to share a photo from your neighborhood gathering!</p>
+            </div>
+          ) : (
+            <div className="columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6 pb-16">
+              {photos.map(photo => (
+                <div key={photo.id} className="break-inside-avoid bg-[#111827] border border-gray-800 rounded-3xl overflow-hidden shadow-xl hover:border-pink-500/50 transition-all group">
+                  <div className="w-full aspect-square relative bg-gray-900 flex items-center justify-center overflow-hidden">
+                    <img src={photo.imageUrl} alt={photo.caption} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  </div>
+                  <div className="p-5 relative bg-[#111827] z-10">
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-pink-400 bg-pink-950/50 px-2 py-0.5 rounded-full border border-pink-800/50 mb-2 inline-block">{photo.groupName}</span>
+                    <p className="text-sm text-gray-200 font-medium mb-3">&ldquo;{photo.caption}&rdquo;</p>
+                    <div className="flex justify-between items-center border-t border-gray-800/80 pt-3">
+                      <p className="text-[10px] text-pink-300/80 font-semibold">📸 {photo.uploadedBy}</p>
+                      <p className="text-[10px] text-gray-500">{photo.date}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
       ) : isSavedView ? (
@@ -2973,14 +3172,14 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="flex justify-between items-center mb-8 bg-[#111827] p-6 rounded-2xl border border-gray-800">
             <div>
               <h3 className="text-2xl font-black text-white">My Favorites</h3>
-              <p className="text-sm text-gray-400 mt-1">Your bookmarked communities and favorite zip codes.</p>
+              <p className="text-sm text-gray-400 mt-1">Your bookmarked communities and favorite zip codes synced to the cloud.</p>
             </div>
             <button onClick={handleReset} className="px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-sm rounded-xl border border-gray-700 transition-all cursor-pointer">&larr; Back to Home</button>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pb-16">
             <div className="bg-[#111827] border border-gray-800 rounded-3xl p-6 shadow-xl">
-              <h4 className="text-sm font-black text-purple-400 uppercase tracking-wider mb-4 border-b border-gray-800 pb-2">Saved Groups ({groups.filter(group => !group.isHostOnly && (favorites.has(group.id) || joinedGroups.has(group.id))).length})</h4>
+              <h4 className="text-sm font-black text-purple-400 uppercase tracking-wider mb-4 border-b border-gray-800 pb-2">Saved & Joined Groups ({groups.filter(group => !group.isHostOnly && (favorites.has(group.id) || joinedGroups.has(group.id))).length})</h4>
               {favorites.size === 0 && joinedGroups.size === 0 ? (
                 <p className="text-xs text-gray-500 italic py-8 text-center">No saved or joined groups yet.</p>
               ) : (
@@ -2991,10 +3190,10 @@ const searchGiphy = async (searchTerm: string) => {
                         <span className="text-2xl">{group.icon}</span>
                         <div>
                           <p className="text-sm font-bold text-white">{group.name}</p>
-                          <p className="text-[10px] text-cyan-400">Zip: {group.zipCode} &bull; {group.members} Members</p>
+                          <p className="text-[10px] text-cyan-400">Zip: {group.zipCode} &bull; {groupMemberCounts[group.id] || 0} Members</p>
                         </div>
                       </div>
-                      <button onClick={() => { setIsSavedView(false); setSelectedGroup(group); }} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-300 text-xs font-bold rounded-xl border border-gray-700">View</button>
+                      <button onClick={() => { setIsSavedView(false); setSelectedGroup(group); }} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-300 text-xs font-bold rounded-xl border border-gray-700 cursor-pointer">View</button>
                     </div>
                   ))}
                 </div>
@@ -3004,7 +3203,7 @@ const searchGiphy = async (searchTerm: string) => {
             <div className="bg-[#111827] border border-gray-800 rounded-3xl p-6 shadow-xl">
               <h4 className="text-sm font-black text-amber-400 uppercase tracking-wider mb-4 border-b border-gray-800 pb-2">Saved Zip Codes ({savedZips.length})</h4>
               {savedZips.length === 0 ? (
-                <p className="text-xs text-gray-500 italic py-8 text-center">No saved zip codes yet. Search a zip code and click 'Save Zip Code'!</p>
+                <p className="text-xs text-gray-500 italic py-8 text-center">No saved zip codes yet. Search a zip code and click &apos;Save Zip Code&apos;!</p>
               ) : (
                 <div className="flex flex-col gap-4 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
                   {savedZips.map((z) => (
@@ -3017,8 +3216,8 @@ const searchGiphy = async (searchTerm: string) => {
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => { setZipCode(z); setHasSearched(true); setIsSavedView(false); }} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl">Explore</button>
-                        <button onClick={() => toggleSaveZip(z)} className="px-3 py-2 bg-rose-950 text-rose-300 text-xs font-bold rounded-xl border border-rose-900">Remove</button>
+                        <button onClick={() => { setZipCode(z); setHasSearched(true); setIsSavedView(false); }} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl cursor-pointer">Explore</button>
+                        <button onClick={() => toggleSaveZip(z)} className="px-3 py-2 bg-rose-950 text-rose-300 text-xs font-bold rounded-xl border border-rose-900 cursor-pointer">Remove</button>
                       </div>
                     </div>
                   ))}
@@ -3052,14 +3251,14 @@ const searchGiphy = async (searchTerm: string) => {
                     <button onClick={() => toggleFavorite(selectedGroup.id)} className={`px-3 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-md ${isFavorited ? "bg-amber-950/80 border-amber-800 text-amber-400" : "bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-300 hover:text-amber-400"}`}>
                       <span>{isFavorited ? "★" : "☆"}</span><span>{isFavorited ? "Favorited" : "Favorite"}</span>
                     </button>
-                    <button onClick={() => requireHostSubscription(() => setIsHostOpen(true))} className="px-3 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold rounded-xl border border-gray-700 text-xs transition-all cursor-pointer shadow-md">+ Host</button>
+                    <button onClick={() => requireHostSubscription(() => { setHostZipCodes(selectedGroup.zipCode); setSelectedCategoryGroup(selectedGroup.name); setIsHostOpen(true); })} className="px-3 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold rounded-xl border border-gray-700 text-xs transition-all cursor-pointer shadow-md">+ Host</button>
                     
                     <button 
-  onClick={() => requireAuth(() => setIsDiscordModalOpen(true))} 
-  className="px-3 py-2.5 bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 font-bold rounded-xl border border-indigo-700 text-xs transition-all cursor-pointer shadow-md"
->
-  🎮 Discord
-</button>
+                      onClick={() => requireAuth(() => setIsDiscordModalOpen(true))} 
+                      className="px-3 py-2.5 bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 font-bold rounded-xl border border-indigo-700 text-xs transition-all cursor-pointer shadow-md"
+                    >
+                      🎮 Discord
+                    </button>
 
                     <button onClick={() => toggleJoinGroup(selectedGroup.id)} className={`px-5 py-2.5 font-bold rounded-xl shadow-lg transition-all cursor-pointer text-xs md:text-sm ${isJoined ? "bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700" : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:opacity-90"}`}>
                       {isJoined ? "Leave Group" : "Join Group"}
@@ -3072,72 +3271,100 @@ const searchGiphy = async (searchTerm: string) => {
               </div>
             </div>
 
-      <div className="mt-6 bg-gray-900/80 border border-gray-800 rounded-2xl p-5">
-  <div className="flex justify-between items-center mb-4">
-    <h3 className="text-sm font-bold text-gray-200 uppercase tracking-wider">👥 Local Group Members</h3>
-    <span className="text-xs text-gray-400 bg-gray-800 px-2.5 py-1 rounded-full">
-      {activeGroupMembers.length} Local Members
-    </span>
-  </div>
-  
-  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-    {activeGroupMembers.length > 0 ? (
-      activeGroupMembers.map((member) => (
-        <div key={member.id} className="bg-gray-800/60 border border-gray-700/60 rounded-xl p-3 flex items-center justify-between hover:border-gray-600 transition-colors">
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white text-sm overflow-hidden border border-gray-600">
-              {member.avatarUrl ? (
-                <img src={member.avatarUrl} alt={member.name || member.id} className="w-full h-full object-cover" />
-              ) : (
-                (member.name || member.id)[0].toUpperCase()
-              )}
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-200 capitalize">{member.name || member.id}</p>
-              {member.discordLinked && member.discordInviteUrl ? (
-                <a 
-                  href={member.discordInviteUrl.startsWith('http') ? member.discordInviteUrl : `https://${member.discordInviteUrl}`} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="text-xs text-indigo-400 flex items-center gap-1 hover:text-indigo-300 hover:underline"
-                  title={member.discordInviteUrl} 
-                >
-                  🎮 {member.discordInviteUrl.includes('/users/') ? 'Discord Profile' : 'Discord Server'}
-                </a>
-              ) : (
-                <span className="text-xs text-gray-500 italic">No Discord</span>
-              )}
-            </div>
-          </div>
-        </div>
-      ))
-    ) : (
-      <p className="text-sm text-gray-500 italic col-span-full">No local members yet. Be the first to join!</p>
-    )}
-  </div>
-</div>
+            {/* LOCAL GROUP MEMBERS ROSTER (100% REAL CLOUD DATA + AVATAR + DISCORD) */}
+            <div className="mt-6 mb-6 bg-gray-900/80 border border-gray-800 rounded-2xl p-5">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-sm font-bold text-gray-200 uppercase tracking-wider">👥 Local Group Members</h3>
+                <span className="text-xs text-gray-400 bg-gray-800 px-2.5 py-1 rounded-full">
+                  {activeGroupMembers.length} Local {activeGroupMembers.length === 1 ? "Member" : "Members"}
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {activeGroupMembers.length > 0 ? (
+                  activeGroupMembers.map((member) => {
+                    const isSelf = userName && (member.id?.toLowerCase() === userName.toLowerCase() || member.name?.toLowerCase() === userName.toLowerCase());
+                    const displayAvatar = isSelf ? (userAvatarUrl || member.avatarUrl) : member.avatarUrl;
+                    const displayDiscord = isSelf ? (discordInviteUrl || member.discordInviteUrl) : member.discordInviteUrl;
+                    const displayName = member.name || member.userName || member.id;
 
-            {/* DISCORD LINK & SYNC MODAL */}
+                    return (
+                      <div key={member.id} className="bg-gray-800/60 border border-gray-700/60 rounded-xl p-3 flex items-center justify-between hover:border-gray-600 transition-colors">
+                        <div className="flex items-center space-x-3 overflow-hidden">
+                          <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white text-sm overflow-hidden border border-cyan-500/40 shrink-0">
+                            {displayAvatar ? (
+                              <img src={displayAvatar} alt={displayName} className="w-full h-full object-cover" />
+                            ) : (
+                              String(displayName || "U")[0].toUpperCase()
+                            )}
+                          </div>
+                          <div className="truncate">
+                            <p className="text-sm font-semibold text-gray-200 truncate">{displayName}</p>
+                            {displayDiscord && displayDiscord.trim() !== "" ? (
+                              <a 
+                                href={formatDiscordHref(displayDiscord)} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-xs text-indigo-400 flex items-center gap-1 hover:text-indigo-300 hover:underline truncate"
+                                title={displayDiscord} 
+                              >
+                                🎮 {displayDiscord.includes('/users/') || /^\d+$/.test(displayDiscord.trim()) ? 'Discord Profile' : 'Discord Server'} ↗
+                              </a>
+                            ) : (
+                              <span className="text-xs text-gray-500 italic">No Discord</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-sm text-gray-500 italic col-span-full">No local members yet. Click &ldquo;Join Group&rdquo; above to be the first!</p>
+                )}
+              </div>
+            </div>
+
+            {/* DISCORD LINK & SYNC MODAL (CLOUD SYNCED) */}
             {isDiscordModalOpen && (
               <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[250] p-4">
                 <div className="bg-[#111827] border border-indigo-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative">
                   <button onClick={() => setIsDiscordModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
                   <h3 className="text-xl font-black text-indigo-400 mb-1">🎮 Link & Sync Your Discord Account</h3>
-                  <p className="text-xs text-gray-300 mb-6">Connect your Discord server or profile with Zip Groups to sync roles, server invites, and event notifications both ways.</p>
+                  <p className="text-xs text-gray-300 mb-6">Connect your Discord server invite or personal Discord user profile to display on your Zip Friend Card and inside every group you join.</p>
 
                   <div className="flex flex-col gap-4">
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">Discord Invite URL / User ID</label>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">Discord Invite URL or User ID</label>
                       <input 
                         type="text" 
-                        placeholder="https://discord.gg/yourserver or https://discord.com/users/user_id" 
+                        placeholder="https://discord.gg/yourserver or https://discord.com/users/123456789" 
                         value={discordInviteUrl} 
                         onChange={(e) => setDiscordInviteUrl(e.target.value)} 
                         className="w-full px-4 py-3 bg-black border border-gray-700 rounded-xl text-white text-xs focus:border-indigo-500" 
                       />
                     </div>
-                    <button onClick={() => { setDiscordLinked(true); setIsDiscordModalOpen(false); setNotification("🎮 Discord account successfully linked and synced!"); }} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl cursor-pointer">
-                      {discordLinked ? "Discord Linked & Synced ✅" : "Link & Sync Discord Account"}
+                    <button 
+                      onClick={async () => {
+                        const clean = discordInviteUrl.trim();
+                        const linked = clean.length > 0;
+                        setDiscordLinked(linked);
+                        if (userName) {
+                          try {
+                            await setDoc(doc(db, "users", userName.toLowerCase()), {
+                              discordInviteUrl: clean,
+                              discordLinked: linked,
+                              showDiscordOnCard: true
+                            }, { merge: true });
+                          } catch (err) {
+                            console.error("Error syncing Discord to cloud:", err);
+                          }
+                        }
+                        setIsDiscordModalOpen(false);
+                        setNotification("🎮 Discord link saved to the cloud and synced to your cards & groups!");
+                      }} 
+                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl cursor-pointer"
+                    >
+                      Save & Sync Discord to Cloud
                     </button>
                   </div>
                 </div>
@@ -3145,7 +3372,7 @@ const searchGiphy = async (searchTerm: string) => {
             )}
 
             <p className="text-base text-gray-300 mb-8 leading-relaxed">
-              "{selectedGroup.description}" 
+              &ldquo;{selectedGroup.description}&rdquo; 
               {!selectedGroup.isHostOnly && ` Welcome to the local hub for ${selectedGroup.name.toLowerCase()}. Connect with neighbors who share your exact interests right down the street.`}
             </p>
 
@@ -3162,136 +3389,135 @@ const searchGiphy = async (searchTerm: string) => {
                 </div>
 
                 <div className="flex justify-between items-center mb-4">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-400">Upcoming Group Gatherings</h4>
-                  <button onClick={() => requireHostSubscription(() => setIsHostOpen(true))} className="text-xs text-cyan-400 hover:underline font-bold cursor-pointer">+ Host a Gathering</button>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-400">Upcoming Group Gatherings ({activeGroupEvents.length})</h4>
+                  <button onClick={() => requireHostSubscription(() => { setHostZipCodes(selectedGroup.zipCode); setSelectedCategoryGroup(selectedGroup.name); setIsHostOpen(true); })} className="text-xs text-cyan-400 hover:underline font-bold cursor-pointer">+ Host a Gathering</button>
                 </div>
                 
-                {(() => {
-                  const validEvents = getValidEvents(selectedGroup.events);
-                  if (validEvents.length > 0) {
-                    return (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {validEvents.map((evt, idx) => {
-                          const evtId = typeof evt === 'string' ? evt : (evt.id || evt.text);
-                          const evtTitleName = typeof evt !== 'string' && evt.title ? evt.title : (typeof evt === 'string' ? evt : evt.text);
-                          const evtDescText = typeof evt !== 'string' && evt.description ? evt.description : `Neighborhood gathering in ${selectedGroup.location}.`;
-                          const evtColor = typeof evt === 'string' ? selectedGroup.color : evt.color;
-                          const evtHost = typeof evt === 'string' ? null : evt.host;
-                          const evtLocation = typeof evt !== 'string' && evt.locationName ? evt.locationName : `Local venue in ${selectedGroup.location}`;
-                          const isVerified = typeof evt !== 'string' && evt.isVerifiedVenue;
-                          const perk = typeof evt !== 'string' ? evt.venuePerk : null;
-                          const checklist = typeof evt !== 'string' ? evt.checklist : undefined;
-                          
-                          const rsvpKey = `${selectedGroup.id}-${evtId}`;
-                          const isGoing = rsvps[rsvpKey];
-                          const rsvpCount = isGoing ? 4 : 3;
+                {activeGroupEvents.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {activeGroupEvents.map((rawEvt, idx) => {
+                      const evt: GroupEvent = typeof rawEvt === "string" ? { id: rawEvt, text: rawEvt, color: selectedGroup.color, rsvps: [] } : rawEvt;
+                      const evtTitleName = evt.title || evt.text;
+                      const evtDescText = evt.description || `Neighborhood gathering in ${selectedGroup.location}.`;
+                      const evtColor = evt.color || selectedGroup.color;
+                      const evtHost = evt.host;
+                      const evtLocation = evt.locationName || `Local venue in ${selectedGroup.location}`;
+                      const checklist = evt.checklist;
+                      const realRsvpList = Array.isArray(evt.rsvps) ? evt.rsvps : [];
+                      const isGoing = userName ? realRsvpList.some(u => u.toLowerCase() === userName.toLowerCase()) : false;
+                      const rsvpCount = realRsvpList.length;
 
-                          return (
-                            <div key={idx} className="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col justify-between relative">
-                              {evtHost === userName && (
-                                <div className="absolute top-4 right-4 flex gap-1.5 bg-gray-950/80 p-1.5 rounded-lg border border-gray-700/50 shadow-md z-10">
-                                  <button onClick={() => handleEditEvent(selectedGroup.id, evtId, evtTitleName)} className="text-[10px] text-cyan-400 hover:text-cyan-300 px-2 py-1 rounded hover:bg-gray-800 font-bold transition-colors">Edit</button>
-                                  <button onClick={() => handleCancelEvent(selectedGroup.id, evtId)} className="text-[10px] text-rose-400 hover:text-rose-300 px-2 py-1 rounded hover:bg-gray-800 font-bold transition-colors">Cancel</button>
-                                </div>
-                              )}
-                              <div className="pr-24">
-                                <span className={`text-[10px] px-2.5 py-0.5 rounded-full border ${evtColor}`}>Active Meetup</span>
-                                <h4 className="text-base font-bold text-white mt-2">{evtTitleName}</h4>
-                                <p className="text-xs text-gray-300 mt-1 leading-relaxed">{evtDescText}</p>
-                                <p className="text-[11px] text-cyan-400 mt-1.5">📍 {evtLocation}</p>
-                                
-                                {isVerified && (
-                                  <div className="mt-1.5 inline-flex flex-col gap-1">
-                                    <span className="inline-flex items-center gap-1 text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold w-fit">🛡️ Verified Local Partner</span>
-                                    {perk && <span className="text-[10px] text-amber-200/70 italic">🎁 {perk}</span>}
-                                  </div>
-                                )}
-                                
-                                <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-                                  <a href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(selectedGroup.name + " - " + evtTitleName)}&location=${encodeURIComponent(evtLocation)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[10px] text-cyan-300 bg-cyan-950/40 hover:bg-cyan-900/60 border border-cyan-800/50 px-2.5 py-1 rounded-md transition-colors">
-                                    📅 Add to Google Calendar
-                                  </a>
-                                  
-                                  <button onClick={() => {
-                                    setNotification(`🎉 Yay! You're Here! Checked into "${evtTitleName}" successfully. Streak & Stellar rating updated!`);
-                                  }} className="inline-flex items-center gap-1 text-[10px] text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-800/60 px-2.5 py-1 rounded-md transition-colors font-bold cursor-pointer">
-                                    📷 Scan Table QR
-                                  </button>
-                                </div>
-                              </div>
-
-                              {checklist && checklist.length > 0 && (
-                                <div className="mt-4 bg-gray-950/50 p-3 rounded-xl border border-gray-800/60">
-                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">📋 Potluck & Needs Checklist</p>
-                                  <div className="flex flex-col gap-1.5">
-                                    {checklist.map(item => (
-                                      <div key={item.id} className="flex justify-between items-center text-xs">
-                                        <span className="text-gray-300">• {item.name}</span>
-                                        {item.claimedBy ? (
-                                          <span className="text-[10px] text-emerald-400 italic">Brought by {item.claimedBy}</span>
-                                        ) : (
-                                          <button onClick={() => handleClaimItem(selectedGroup.id, evtId, item.id)} className="text-[10px] bg-gray-800 hover:bg-gray-700 text-cyan-400 px-2.5 py-1 rounded-md border border-gray-700 font-bold transition-colors cursor-pointer">Claim Item</button>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                      return (
+                        <div key={evt.id || idx} className="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col justify-between relative">
+                          {evtHost && userName && evtHost.toLowerCase() === userName.toLowerCase() && (
+                            <div className="absolute top-4 right-4 flex gap-1.5 bg-gray-950/80 p-1.5 rounded-lg border border-gray-700/50 shadow-md z-10">
+                              <button onClick={() => handleEditEvent(evt)} className="text-[10px] text-cyan-400 hover:text-cyan-300 px-2 py-1 rounded hover:bg-gray-800 font-bold transition-colors cursor-pointer">Edit</button>
+                              <button onClick={() => handleCancelEvent(evt.id)} className="text-[10px] text-rose-400 hover:text-rose-300 px-2 py-1 rounded hover:bg-gray-800 font-bold transition-colors cursor-pointer">Cancel</button>
+                            </div>
+                          )}
+                          <div className="pr-20">
+                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full border ${evtColor}`}>Active Meetup</span>
+                            {evt.isAdultOnly && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 font-bold">18+ Only</span>}
+                            <h4 className="text-base font-bold text-white mt-2">{evtTitleName}</h4>
+                            <p className="text-xs text-gray-300 mt-1 leading-relaxed">{evtDescText}</p>
+                            <p className="text-[11px] text-cyan-400 mt-1.5">📍 {evtLocation}</p>
+                            
+                            <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+                              <a href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(selectedGroup.name + " - " + evtTitleName)}&location=${encodeURIComponent(evtLocation)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[10px] text-cyan-300 bg-cyan-950/40 hover:bg-cyan-900/60 border border-cyan-800/50 px-2.5 py-1 rounded-md transition-colors">
+                                📅 Add to Google Calendar
+                              </a>
                               
-                              <div className="mt-4 pt-4 border-t border-gray-800/50 flex flex-col gap-3">
-                                <div className="bg-black/40 p-3 rounded-xl border border-gray-800/80">
-                                  <div className="flex justify-between items-center mb-2">
-                                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Who's Going:</p>
-                                    {rsvpCount < 4 ? (
-                                      <span className="text-[10px] text-amber-500 font-bold border border-amber-500/30 bg-amber-950/30 px-1.5 py-0.5 rounded">Need 1+ to meet min.</span>
+                              <button onClick={async () => {
+                                const nextStreak = userStreak + 1;
+                                setUserStreak(nextStreak);
+                                if (userName) {
+                                  await setDoc(doc(db, "users", userName.toLowerCase()), { streak: nextStreak }, { merge: true });
+                                }
+                                setNotification(`🎉 Checked into "${evtTitleName}"! Your Attendance Streak is now 🔥 ${nextStreak}!`);
+                              }} className="inline-flex items-center gap-1 text-[10px] text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-800/60 px-2.5 py-1 rounded-md transition-colors font-bold cursor-pointer">
+                                📷 Event Check-In
+                              </button>
+                            </div>
+                          </div>
+
+                          {checklist && checklist.length > 0 && (
+                            <div className="mt-4 bg-gray-950/50 p-3 rounded-xl border border-gray-800/60">
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">📋 Potluck & Needs Checklist</p>
+                              <div className="flex flex-col gap-1.5">
+                                {checklist.map(item => (
+                                  <div key={item.id} className="flex justify-between items-center text-xs">
+                                    <span className="text-gray-300">• {item.name}</span>
+                                    {item.claimedBy ? (
+                                      <span className="text-[10px] text-emerald-400 italic">Brought by {item.claimedBy}</span>
                                     ) : (
-                                      <span className="text-[10px] text-emerald-400 font-bold">{rsvpCount} RSVPs (Active)</span>
+                                      <button onClick={() => handleClaimItem(evt, item.id)} className="text-[10px] bg-gray-800 hover:bg-gray-700 text-cyan-400 px-2.5 py-1 rounded-md border border-gray-700 font-bold transition-colors cursor-pointer">Claim Item</button>
                                     )}
                                   </div>
-                                  <div className="flex flex-wrap gap-1.5 items-center">
-                                    {isGoing && <span className="text-xs px-2.5 py-0.5 rounded-md bg-cyan-950 text-cyan-300 border border-cyan-800/60 font-semibold shadow-inner">You ({userName})</span>}
-                                    <span className="text-[11px] px-2 py-0.5 rounded-md bg-gray-800 text-gray-300 border border-gray-700 flex items-center gap-1 shadow-inner">Marcus T. <span title="Stellar Attendee">⭐</span></span>
-                                    <span className="text-[11px] px-2 py-0.5 rounded-md bg-gray-800 text-gray-300 border border-gray-700 flex items-center gap-1 shadow-inner">Sarah L. <span title="5 Event Streak">🔥5</span></span>
-                                    <span className="text-[11px] px-2 py-0.5 rounded-md bg-gray-800 text-gray-300 border border-gray-700 shadow-inner">Elena R.</span>
-                                  </div>
-                                </div>
-
-                                <div className="flex flex-col gap-2">
-                                  {!isJoined ? (
-                                    <button onClick={() => setNotification("Please join the group to RSVP for events!")} className="py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer flex items-center justify-center gap-2"><span>🔒</span><span>RSVP (Members Only)</span></button>
-                                  ) : !isGoing ? (
-                                    <button onClick={() => toggleRSVP(rsvpKey)} className="py-2.5 font-bold text-xs rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-2 bg-cyan-950/60 border-cyan-800 text-cyan-400 hover:bg-cyan-900/60">RSVP Now</button>
-                                  ) : (
-                                    <div className="flex flex-col gap-2">
-                                      <button onClick={() => toggleRSVP(rsvpKey)} className="py-2.5 font-bold text-xs rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-2 bg-emerald-950/60 border-emerald-800 text-emerald-400 hover:bg-emerald-900/60">✅ You're Going! (Click to cancel)</button>
-                                      
-                                      <div className="flex gap-2">
-                                        <button onClick={() => {
-                                          setNotification("You are now offering a carpool!");
-                                          const newMsg: ChatMessage = { id: Date.now(), user: userName, isHost: userHostedEvents > 0, time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:false}), timestamp: Date.now(), text: `🚗 I am offering a carpool to "${evtTitleName}"! Direct Message me to coordinate.`, color: selectedChatStyle };
-                                          setSelectedGroup(prev => prev ? {...prev, chatMessages: [...prev.chatMessages, newMsg]} : prev);
-                                        }} className="flex-1 text-[10px] font-bold bg-indigo-950/60 text-indigo-300 border border-indigo-800/60 hover:bg-indigo-900/60 py-2 rounded-lg transition-colors cursor-pointer">🚗 Offer Carpool</button>
-                                        
-                                        <button onClick={() => {
-                                          setNotification("You've opted to meet at the door!");
-                                          const newMsg: ChatMessage = { id: Date.now(), user: userName, isHost: userHostedEvents > 0, time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:false}), timestamp: Date.now(), text: `🚶 I will be waiting at the entrance for "${evtTitleName}" so we can walk in together!`, color: selectedChatStyle };
-                                          setSelectedGroup(prev => prev ? {...prev, chatMessages: [...prev.chatMessages, newMsg]} : prev);
-                                        }} className="flex-1 text-[10px] font-bold bg-teal-950/60 text-teal-300 border border-teal-800/60 hover:bg-teal-900/60 py-2 rounded-lg transition-colors cursor-pointer">🚶 Walk In Together</button>
-                                      </div>
-                                    </div>
-                                  )}
-                                  <p className="text-[9px] text-center text-gray-500 italic mt-1">* By RSVPing, you accept attendance is at your own discretion.</p>
-                                </div>
+                                ))}
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  } else {
-                    return <p className="text-sm text-gray-500 italic">No upcoming events scheduled right now. Be the first to host one!</p>;
-                  }
-                })()}
+                          )}
+                          
+                          {/* REAL CLOUD RSVPS ONLY — ZERO FAKE NAMES */}
+                          <div className="mt-4 pt-4 border-t border-gray-800/50 flex flex-col gap-3">
+                            <div className="bg-black/40 p-3 rounded-xl border border-gray-800/80">
+                              <div className="flex justify-between items-center mb-2">
+                                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Who&apos;s Going ({rsvpCount}):</p>
+                                {rsvpCount < 4 ? (
+                                  <span className="text-[10px] text-amber-500 font-bold border border-amber-500/30 bg-amber-950/30 px-1.5 py-0.5 rounded">
+                                    {4 - rsvpCount} more for 4+ safety rec.
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-emerald-400 font-bold">{rsvpCount} RSVPs (Active)</span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 items-center">
+                                {realRsvpList.length === 0 ? (
+                                  <span className="text-xs text-gray-500 italic">No RSVPs yet. Be the first to RSVP!</span>
+                                ) : (
+                                  realRsvpList.map((rsvpUser, rIdx) => (
+                                    <span key={rIdx} className={`text-xs px-2.5 py-0.5 rounded-md border font-semibold shadow-inner ${userName && rsvpUser.toLowerCase() === userName.toLowerCase() ? 'bg-cyan-950 text-cyan-300 border-cyan-800/60' : 'bg-gray-800 text-gray-200 border-gray-700'}`}>
+                                      {rsvpUser}
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+                              {!isJoined ? (
+                                <button onClick={() => setNotification("Please join the group first to RSVP for events!")} className="py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer flex items-center justify-center gap-2"><span>🔒</span><span>Join Group to RSVP</span></button>
+                              ) : !isGoing ? (
+                                <button onClick={() => toggleRSVP(evt)} className="py-2.5 font-bold text-xs rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-2 bg-cyan-950/60 border-cyan-800 text-cyan-400 hover:bg-cyan-900/60">RSVP Now</button>
+                              ) : (
+                                <div className="flex flex-col gap-2">
+                                  <button onClick={() => toggleRSVP(evt)} className="py-2.5 font-bold text-xs rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-2 bg-emerald-950/60 border-emerald-800 text-emerald-400 hover:bg-emerald-900/60">✅ You&apos;re Going! (Click to cancel)</button>
+                                  
+                                  <div className="flex gap-2">
+                                    <button onClick={async () => {
+                                      const newMsg: ChatMessage = { id: Date.now(), user: userName, isHost: userHostedEvents > 0, time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:true}), timestamp: Date.now(), text: `🚗 I am offering a carpool to "${evtTitleName}"! Direct Message me to coordinate.`, color: selectedChatStyle };
+                                      await addDoc(collection(db, "groups", selectedGroup.id, "messages"), newMsg);
+                                      setNotification("🚗 Carpool offer posted to group chat!");
+                                    }} className="flex-1 text-[10px] font-bold bg-indigo-950/60 text-indigo-300 border border-indigo-800/60 hover:bg-indigo-900/60 py-2 rounded-lg transition-colors cursor-pointer">🚗 Offer Carpool</button>
+                                    
+                                    <button onClick={async () => {
+                                      const newMsg: ChatMessage = { id: Date.now(), user: userName, isHost: userHostedEvents > 0, time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:true}), timestamp: Date.now(), text: `🚶 I will be waiting at the entrance for "${evtTitleName}" so we can walk in together!`, color: selectedChatStyle };
+                                      await addDoc(collection(db, "groups", selectedGroup.id, "messages"), newMsg);
+                                      setNotification("🚶 Walk-in message posted to group chat!");
+                                    }} className="flex-1 text-[10px] font-bold bg-teal-950/60 text-teal-300 border border-teal-800/60 hover:bg-teal-900/60 py-2 rounded-lg transition-colors cursor-pointer">🚶 Walk In Together</button>
+                                  </div>
+                                </div>
+                              )}
+                              <p className="text-[9px] text-center text-gray-500 italic mt-1">* By RSVPing, you accept attendance is at your own discretion.</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">No upcoming gatherings scheduled in this chapter yet. Click &ldquo;+ Host a Gathering&rdquo; to schedule one!</p>
+                )}
               </div>
             )}
 
@@ -3308,7 +3534,7 @@ const searchGiphy = async (searchTerm: string) => {
             
             {!isJoined && !selectedGroup.isHostOnly ? (
               <div className="bg-gray-900/90 border border-gray-800 rounded-2xl p-8 text-center relative overflow-hidden">
-                <div className="absolute inset-0 backdrop-blur-[2px] bg-gray-950/40 flex flex-col items-center justify-center z-10 p-6">
+                <div className="flex flex-col items-center justify-center z-10 p-6">
                   <div className="text-3xl mb-2">🔒</div>
                   <h4 className="text-lg font-bold text-white mb-1">Group Chatroom is Locked</h4>
                   <p className="text-xs text-gray-400 max-w-sm mb-4">You must join this group to view and participate in the live local chat.</p>
@@ -3330,76 +3556,57 @@ const searchGiphy = async (searchTerm: string) => {
                   </div>
                 )}
 
-                {/* RESPONSIVE CHAT HEADER */}
                 <div className={`bg-gradient-to-r ${selectedGroup.isHostOnly ? 'from-amber-900 to-amber-950' : 'from-blue-900 to-blue-800'} text-white px-3 py-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 border-b border-gray-600 shadow-md`}>
                   <div className="flex items-center gap-2">
                     <span className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] shrink-0"></span>
-                    <span className="font-bold tracking-wider text-xs sm:text-sm">{selectedGroup.name} - Live</span>
+                    <span className="font-bold tracking-wider text-xs sm:text-sm">{selectedGroup.name} - Live Cloud Chat</span>
                   </div>
-                  <p className={`text-sm mt-1 ${selectedGroup.isHostOnly ? 'text-amber-400 font-bold' : 'text-cyan-400'}`}>{selectedGroup.location} &bull; {activeGroupMembers.length} Local {selectedGroup.isHostOnly ? 'Hosts' : 'Members'}</p>
+                  <p className={`text-xs sm:text-sm ${selectedGroup.isHostOnly ? 'text-amber-400 font-bold' : 'text-cyan-400'}`}>{selectedGroup.location} &bull; {activeGroupMembers.length} Local {selectedGroup.isHostOnly ? 'Hosts' : 'Members'}</p>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-1.5 bg-[#050505] custom-scrollbar">
-  <div className="text-center text-gray-500 text-[11px] sm:text-xs mb-3">
-    *** Chat session started in {selectedGroup.zipCode} ***
-  </div>
+                  <div className="text-center text-gray-500 text-[11px] sm:text-xs mb-3">
+                    *** Live cloud chat session in {selectedGroup.zipCode} ***
+                  </div>
 
-  {selectedGroup.chatMessages.length === 0 ? (
-    <p className="text-gray-500 text-xs text-center mt-10">No messages yet. Say hello to your neighbors!</p>
-  ) : (
-    selectedGroup.chatMessages.map((msg) => {
-      const gifTagMatch = msg.text.match(/\[GIF:\s*(.*?)\]/i);
-      const directUrlMatch = msg.text.match(/(https?:\/\/[^\s]+\.(?:gif|webp|png|jpg|jpeg)(?:\?[^\s]*)?)/i);
-      const mediaUrl = gifTagMatch ? gifTagMatch[1] : (directUrlMatch ? directUrlMatch[0] : null);
-      const cleanText = msg.text.replace(/\[GIF:\s*(.*?)\]/gi, '').trim();
+                  {selectedGroup.chatMessages.length === 0 ? (
+                    <p className="text-gray-500 text-xs text-center mt-10">No messages yet. Say hello to your neighbors!</p>
+                  ) : (
+                    selectedGroup.chatMessages.map((msg) => {
+                      const gifTagMatch = msg.text.match(/\[GIF:\s*(.*?)\]/i);
+                      const directUrlMatch = msg.text.match(/(https?:\/\/[^\s]+\.(?:gif|webp|png|jpg|jpeg)(?:\?[^\s]*)?)/i);
+                      const mediaUrl = gifTagMatch ? gifTagMatch[1] : (directUrlMatch ? directUrlMatch[0] : null);
+                      const cleanText = msg.text.replace(/\[GIF:\s*(.*?)\]/gi, '').trim();
 
-      return (
-        <div key={msg.id} className="text-xs sm:text-sm leading-relaxed break-words py-0.5">
-          {/* Timestamp */}
-          <span className="text-gray-500 select-none mr-1.5 text-[11px] sm:text-xs">
-            [{(() => {
-              if (!msg.time) return '';
-              const parts = msg.time.split(':');
-              const hourNum = parseInt(parts[0], 10);
-              if (parts.length >= 2 && !isNaN(hourNum)) {
-                const minute = parts[1].slice(0, 2);
-                const ampm = hourNum >= 12 ? 'PM' : 'AM';
-                const hour12 = hourNum % 12 || 12;
-                return `${hour12}:${minute} ${ampm}`;
-              }
-              return msg.time;
-            })()}]
-          </span>
-
-          {/* Username & Host Crown */}
-          <span className={`font-bold mr-1.5 ${msg.color} inline-flex items-center gap-1`}>
-            {msg.isHost && <span title="Host">👑</span>}
-            {msg.user}:
-          </span>
-
-          {/* Inline Message Body */}
-          {cleanText && (
-            <span className="text-gray-200">
-              {renderFormattedText(cleanText)}
-            </span>
-          )}
-
-          {/* Media/GIF Render */}
-          {mediaUrl && (
-            <div className="mt-1.5">
-              <img 
-                src={mediaUrl} 
-                alt="Shared GIF" 
-                className="max-h-44 max-w-full sm:max-w-xs rounded-xl border border-gray-700 shadow-md object-contain bg-black/40" 
-                loading="lazy" 
-              />
-            </div>
-          )}
-        </div>
-      );
-    })
-  )}
-</div>
+                      return (
+                        <div key={msg.id} className="text-xs sm:text-sm leading-relaxed break-words py-0.5">
+                          <span className="text-gray-500 select-none mr-1.5 text-[11px] sm:text-xs">
+                            [{msg.time}]
+                          </span>
+                          <span className={`font-bold mr-1.5 ${msg.color} inline-flex items-center gap-1`}>
+                            {msg.isHost && <span title="Host">👑</span>}
+                            {msg.user}:
+                          </span>
+                          {cleanText && (
+                            <span className="text-gray-200">
+                              {renderFormattedText(cleanText)}
+                            </span>
+                          )}
+                          {mediaUrl && (
+                            <div className="mt-1.5">
+                              <img 
+                                src={mediaUrl} 
+                                alt="Shared GIF" 
+                                className="max-h-44 max-w-full sm:max-w-xs rounded-xl border border-gray-700 shadow-md object-contain bg-black/40" 
+                                loading="lazy" 
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
 
                 <div className="bg-gray-900 border-t border-gray-700 flex flex-col relative">
                   {showEmojiPicker && (
@@ -3413,83 +3620,58 @@ const searchGiphy = async (searchTerm: string) => {
                     </div>
                   )}
 
-{showGifPicker && (
-  <div className="absolute bottom-16 left-2 sm:left-20 bg-gray-950 border border-gray-700 p-3 rounded-2xl flex flex-col gap-2.5 shadow-2xl z-30 w-72 sm:w-88">
-    <div className="flex justify-between items-center border-b border-gray-800 pb-2">
-      <p className="text-[11px] text-cyan-400 uppercase font-bold tracking-wider">Search GIFs</p>
-      <button 
-        type="button"
-        onClick={() => setShowGifPicker(false)} 
-        className="text-gray-400 hover:text-white text-xs px-1 cursor-pointer"
-      >
-        ✕
-      </button>
-    </div>
+                  {showGifPicker && (
+                    <div className="absolute bottom-16 left-2 sm:left-20 bg-gray-950 border border-gray-700 p-3 rounded-2xl flex flex-col gap-2.5 shadow-2xl z-30 w-72 sm:w-88">
+                      <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                        <p className="text-[11px] text-cyan-400 uppercase font-bold tracking-wider">Search GIFs</p>
+                        <button type="button" onClick={() => setShowGifPicker(false)} className="text-gray-400 hover:text-white text-xs px-1 cursor-pointer">✕</button>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="Search Giphy (e.g., party, lol, hello)..."
+                          value={gifSearchQuery}
+                          onChange={(e) => setGifSearchQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              searchGiphy(gifSearchQuery);
+                            }
+                          }}
+                          className="flex-1 bg-black border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                        />
+                        <button type="button" onClick={() => searchGiphy(gifSearchQuery)} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0">Search</button>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                        {isSearchingGifs ? (
+                          <div className="py-8 text-center text-xs text-gray-400 animate-pulse">Searching GIFs...</div>
+                        ) : gifSearchResults.length > 0 ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            {gifSearchResults.map((gif) => {
+                              const previewUrl = gif.images?.fixed_height_small?.url || gif.images?.fixed_height?.url;
+                              const fullUrl = gif.images?.original?.url || previewUrl;
+                              return (
+                                <button
+                                  key={gif.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setChatInput(prev => (prev ? `${prev} [GIF: ${fullUrl}]` : `[GIF: ${fullUrl}]`));
+                                    setShowGifPicker(false);
+                                  }}
+                                  className="relative group rounded-xl overflow-hidden border border-gray-800 hover:border-cyan-400 transition-all cursor-pointer bg-black h-24"
+                                >
+                                  <img src={previewUrl} alt={gif.title || "GIF"} className="w-full h-full object-cover group-hover:scale-105 transition-transform" loading="lazy" />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="py-8 text-center text-xs text-gray-500">Type a word above and hit Search to find GIFs!</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
-    {/* Search Input Bar */}
-    <div className="flex gap-1.5">
-      <input
-        type="text"
-        placeholder="Search Giphy (e.g., party, lol, hello)..."
-        value={gifSearchQuery}
-        onChange={(e) => setGifSearchQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            searchGiphy(gifSearchQuery);
-          }
-        }}
-        className="flex-1 bg-black border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
-      />
-      <button
-        type="button"
-        onClick={() => searchGiphy(gifSearchQuery)}
-        className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
-      >
-        Search
-      </button>
-    </div>
-
-    {/* Results Grid / Loading State */}
-    <div className="max-h-60 overflow-y-auto custom-scrollbar pr-1">
-      {isSearchingGifs ? (
-        <div className="py-8 text-center text-xs text-gray-400 animate-pulse">Searching GIFs...</div>
-      ) : gifSearchResults.length > 0 ? (
-        <div className="grid grid-cols-2 gap-2">
-          {gifSearchResults.map((gif) => {
-            const previewUrl = gif.images?.fixed_height_small?.url || gif.images?.fixed_height?.url;
-            const fullUrl = gif.images?.original?.url || previewUrl;
-
-            return (
-              <button
-                key={gif.id}
-                type="button"
-                onClick={() => {
-                  setChatInput(prev => (prev ? `${prev} [GIF: ${fullUrl}]` : `[GIF: ${fullUrl}]`));
-                  setShowGifPicker(false);
-                }}
-                className="relative group rounded-xl overflow-hidden border border-gray-800 hover:border-cyan-400 transition-all cursor-pointer bg-black h-24"
-              >
-                <img 
-                  src={previewUrl} 
-                  alt={gif.title || "GIF"} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
-                  loading="lazy"
-                />
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="py-8 text-center text-xs text-gray-500">
-          Type a word above and hit Search to find GIFs!
-        </div>
-      )}
-    </div>
-  </div>
-)}
-
-                  {/* 90s/00s Chat Toolbar (Font Color & Style Selector) */}
                   <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-gray-800 bg-gray-950 flex-wrap">
                     <div className="flex gap-2 items-center">
                       <button onClick={() => setChatInput(prev => prev ? `*${prev}*` : "*italics*")} className="text-gray-400 hover:text-white px-1.5 rounded transition-colors text-xs font-serif italic cursor-pointer" title="Italics">I</button>
@@ -3497,7 +3679,7 @@ const searchGiphy = async (searchTerm: string) => {
                       <div className="w-px bg-gray-700 my-1 mx-1"></div>
                       <button onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} className="text-gray-400 hover:text-white px-1.5 rounded transition-colors text-sm cursor-pointer" title="Insert Emoji">😀</button>
                       <button onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }} className="text-cyan-400 hover:text-cyan-300 px-1.5 rounded transition-colors text-xs font-bold flex items-center gap-1 cursor-pointer">
-                        🎬 Giphy / Tenor GIFs
+                        🎬 Giphy GIFs
                       </button>
                     </div>
 
@@ -3551,7 +3733,7 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="max-h-[650px] overflow-y-auto p-2 pb-16 grid grid-cols-1 md:grid-cols-2 gap-6 custom-scrollbar">
             {stackedGroups.map((stack, idx) => {
               const primaryGroup = stack[0];
-              const totalStackedMembers = stack.reduce((sum, g) => sum + g.members, 0);
+              const totalStackedMembers = stack.reduce((sum, g) => sum + (groupMemberCounts[g.id] || 0), 0);
               const hasAnyChatActive = stack.some(g => isChatActiveWithin2Mins(g.chatMessages));
               
               return (
@@ -3566,20 +3748,23 @@ const searchGiphy = async (searchTerm: string) => {
                       <div className="w-12 h-12 rounded-xl bg-gray-800 flex items-center justify-center text-xl font-bold shrink-0">{primaryGroup.icon}</div>
                       <div>
                         <p className="text-lg font-bold text-gray-100 leading-tight">{primaryGroup.name}</p>
-                        <p className="text-[10px] text-cyan-400 mt-0.5">{stack.length} Active Chapter{stack.length > 1 ? 's' : ''} &bull; {totalStackedMembers} Total Members</p>
+                        <p className="text-[10px] text-cyan-400 mt-0.5">{stack.length} Active Chapter{stack.length > 1 ? 's' : ''} &bull; {totalStackedMembers} Joined Member{totalStackedMembers === 1 ? '' : 's'}</p>
                       </div>
                     </div>
-                    <p className="text-xs text-gray-300 italic mb-4 line-clamp-2">"{primaryGroup.description}"</p>
+                    <p className="text-xs text-gray-300 italic mb-4 line-clamp-2">&ldquo;{primaryGroup.description}&rdquo;</p>
                   </div>
                   
                   <div className="pt-3 border-t border-gray-800/80">
                     <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Available Neighborhoods:</p>
                     <div className="flex flex-wrap gap-2">
-                      {stack.map(g => (
-                        <button key={g.id} onClick={() => setSelectedGroup(g)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 text-[10px] font-bold rounded-lg border border-gray-700 transition-colors cursor-pointer">
-                          📍 Zip: {g.zipCode} ({g.members} members)
-                        </button>
-                      ))}
+                      {stack.map(g => {
+                        const realCount = groupMemberCounts[g.id] || 0;
+                        return (
+                          <button key={g.id} onClick={() => setSelectedGroup(g)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 text-[10px] font-bold rounded-lg border border-gray-700 transition-colors cursor-pointer">
+                            📍 Zip: {g.zipCode} ({realCount} {realCount === 1 ? 'member' : 'members'})
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -3617,50 +3802,56 @@ const searchGiphy = async (searchTerm: string) => {
             </div>
           </div>
 
-          <div className="w-full flex flex-col xl:flex-row items-stretch justify-center gap-8 relative z-10">
+          <div className="flex flex-col gap-6 w-full xl:w-[280px] shrink-0 justify-center">
             
-            <div className="hidden xl:flex flex-col gap-6 w-[280px] shrink-0 justify-center">
+            <div className="flex flex-col gap-6 w-full xl:w-[280px] shrink-0 justify-center">
               <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 pl-2">🏆 Top Trending Zip Codes</h4>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 pl-2">🏆 Featured Zip Hubs</h4>
                 <div className="flex flex-col gap-3">
-                  <div className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-amber-500/40 p-3 shadow-xl flex items-center gap-3">
+                  <div onClick={() => { setZipCode("43230"); setHasSearched(true); }} className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-amber-500/40 p-3 shadow-xl flex items-center gap-3 cursor-pointer hover:border-amber-400">
                     <span className="text-2xl font-black">🥇</span>
                     <div>
                       <p className="text-xs font-bold text-white">Zip 43230 (Gahanna)</p>
-                      <p className="text-[10px] text-amber-400 font-medium">1,420 Searches Today</p>
+                      <p className="text-[10px] text-amber-400 font-medium">30 Active Community Circles</p>
                     </div>
                   </div>
 
-                  <div className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-gray-700/50 p-3 shadow-xl flex items-center gap-3">
+                  <div onClick={() => { setZipCode("43215"); setHasSearched(true); }} className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-gray-700/50 p-3 shadow-xl flex items-center gap-3 cursor-pointer hover:border-cyan-400">
                     <span className="text-2xl font-black">🥈</span>
                     <div>
                       <p className="text-xs font-bold text-white">Zip 43215 (Downtown)</p>
-                      <p className="text-[10px] text-gray-400 font-medium">980 Searches Today</p>
+                      <p className="text-[10px] text-gray-400 font-medium">30 Active Community Circles</p>
                     </div>
                   </div>
 
-                  <div className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-amber-900/40 p-3 shadow-xl flex items-center gap-3">
+                  <div onClick={() => { setZipCode("43214"); setHasSearched(true); }} className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-amber-900/40 p-3 shadow-xl flex items-center gap-3 cursor-pointer hover:border-purple-400">
                     <span className="text-2xl font-black">🥉</span>
                     <div>
                       <p className="text-xs font-bold text-white">Zip 43214 (Clintonville)</p>
-                      <p className="text-[10px] text-amber-600 font-medium">750 Searches Today</p>
+                      <p className="text-[10px] text-amber-600 font-medium">30 Active Community Circles</p>
                     </div>
                   </div>
                 </div>
               </div>
 
               <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2 pl-2">Top Community Reviews (⭐ 4.0+)</h4>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2 pl-2">Community Reviews (⭐ 4.0+)</h4>
                 <div className="flex flex-col gap-3">
-                  {topReviews.map(rev => (
-                    <div key={rev.id} className="flex flex-col gap-1.5 p-3.5 bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-gray-700/50 shadow-lg">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs text-cyan-400 font-bold">{rev.userName}</span>
-                        <span className="text-amber-400 text-xs">{"★".repeat(rev.rating)}</span>
-                      </div>
-                      <p className="text-xs text-gray-200 italic leading-relaxed">"{rev.text}"</p>
+                  {topReviews.length === 0 ? (
+                    <div className="p-4 bg-[#111827]/85 rounded-2xl border border-gray-800 text-xs text-gray-400 italic">
+                      No community reviews yet. Leave the first review below!
                     </div>
-                  ))}
+                  ) : (
+                    topReviews.map(rev => (
+                      <div key={rev.id} className="flex flex-col gap-1.5 p-3.5 bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-gray-700/50 shadow-lg">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-cyan-400 font-bold">{rev.userName}</span>
+                          <span className="text-amber-400 text-xs">{"★".repeat(rev.rating)}</span>
+                        </div>
+                        <p className="text-xs text-gray-200 italic leading-relaxed">&ldquo;{rev.text}&rdquo;</p>
+                      </div>
+                    ))
+                  )}
                   <button onClick={() => setIsReviewOpen(true)} className="text-xs font-bold text-cyan-400 hover:text-white transition-colors cursor-pointer w-fit mx-auto hover:underline">
                     Leave a Review &rarr;
                   </button>
@@ -3689,31 +3880,21 @@ const searchGiphy = async (searchTerm: string) => {
 
             <div className="hidden xl:flex flex-col gap-6 w-[280px] shrink-0 justify-center">
               <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 pr-2 text-right">👑 Top 3 Community Hosts</h4>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 pr-2 text-right">👑 Top Community Hosts</h4>
                 <div className="flex flex-col gap-3">
-                  <div className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-amber-500/40 p-3 shadow-xl flex items-center gap-3">
-                    <span className="text-2xl font-black">🥇</span>
-                    <div>
-                      <p className="text-xs font-bold text-white">{userName || "Your Name Here"} 👑</p>
-                      <p className="text-[10px] text-amber-400 font-medium">999 Meetups Hosted</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-gray-700/50 p-3 shadow-xl flex items-center gap-3">
-                    <span className="text-2xl font-black">🥈</span>
-                    <div>
-                      <p className="text-xs font-bold text-white">Your Name Here</p>
-                      <p className="text-[10px] text-gray-400 font-medium">142 Meetups Hosted</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-amber-900/40 p-3 shadow-xl flex items-center gap-3">
-                    <span className="text-2xl font-black">🥉</span>
-                    <div>
-                      <p className="text-xs font-bold text-white">Your Name Here</p>
-                      <p className="text-[10px] text-amber-600 font-medium">118 Meetups Hosted</p>
-                    </div>
-                  </div>
+                  {[0, 1, 2].map((rankIdx) => {
+                    const hostUser = topCommunityHosts[rankIdx];
+                    const medals = ["🥇", "🥈", "🥉"];
+                    return (
+                      <div key={rankIdx} className="bg-[#111827]/85 backdrop-blur-md rounded-2xl border border-amber-500/40 p-3 shadow-xl flex items-center gap-3">
+                        <span className="text-2xl font-black">{medals[rankIdx]}</span>
+                        <div>
+                          <p className="text-xs font-bold text-white">{hostUser ? `${hostUser.name || hostUser.id} 👑` : "Claim This Spot 👑"}</p>
+                          <p className="text-[10px] text-amber-400 font-medium">{hostUser ? `${hostUser.hostedCount || 0} Meetups Hosted` : "Host an event to rank!"}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -3740,11 +3921,11 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-2xl w-full z-10">
             <div className="bg-[#111827]/80 border border-cyan-500/20 rounded-2xl p-4 text-center shadow-lg">
               <p className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">{totalGroupsCount}</p>
-              <p className="text-xs text-gray-400 mt-1 uppercase tracking-wider font-semibold">Active Neighborhood Groups</p>
+              <p className="text-xs text-gray-400 mt-1 uppercase tracking-wider font-semibold">Core Categories Per Zip</p>
             </div>
             <div className="bg-[#111827]/80 border border-purple-500/20 rounded-2xl p-4 text-center shadow-lg">
-              <p className="text-3xl font-black bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">{totalMembersCount}+</p>
-              <p className="text-xs text-gray-400 mt-1 uppercase tracking-wider font-semibold">Local Members Connected</p>
+              <p className="text-3xl font-black bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">{totalMembersCount}</p>
+              <p className="text-xs text-gray-400 mt-1 uppercase tracking-wider font-semibold">Registered Cloud Members</p>
             </div>
             <div className="bg-[#111827]/80 border border-emerald-500/20 rounded-2xl p-4 text-center shadow-lg">
               <p className="text-3xl font-black bg-gradient-to-r from-emerald-400 to-green-500 bg-clip-text text-transparent">National</p>
@@ -3756,40 +3937,138 @@ const searchGiphy = async (searchTerm: string) => {
 
       {/* --- GLOBAL POPUP MODALS --- */}
 
+      {/* REAL 6-DIGIT EMAIL VERIFICATION MODAL */}
+      {isVerifyModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[290] p-4">
+          <div className="bg-[#111827] border border-amber-500/50 rounded-3xl p-6 max-w-sm w-full shadow-2xl relative">
+            <button onClick={() => setIsVerifyModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            <h3 className="text-xl font-black text-white mb-1">📧 Verify Your Email</h3>
+            <p className="text-xs text-gray-300 mb-4 leading-relaxed">
+              We sent a 6-digit verification code to <strong className="text-cyan-300">{userEmail || emailSignupInput}</strong>. Enter it below to verify your account.
+            </p>
+            <form onSubmit={handleConfirmVerificationCode} className="flex flex-col gap-3">
+              <input
+                type="text"
+                maxLength={6}
+                placeholder="Enter 6-digit code"
+                value={verificationCodeInput}
+                onChange={(e) => setVerificationCodeInput(e.target.value)}
+                required
+                className="w-full px-4 py-3 bg-black border border-gray-700 rounded-xl text-white text-center font-mono text-lg tracking-widest focus:outline-none focus:border-amber-500"
+              />
+              <button type="submit" className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl cursor-pointer">
+                Confirm Verification Code
+              </button>
+              <button type="button" onClick={handleSendVerificationEmail} className="text-[11px] text-cyan-400 hover:underline cursor-pointer text-center mt-1">
+                Resend Code
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REAL FORGOT / RESET PASSWORD MODAL */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[290] p-4">
+          <div className="bg-[#111827] border border-cyan-500/50 rounded-3xl p-6 max-w-sm w-full shadow-2xl relative">
+            <button onClick={() => { setIsResetModalOpen(false); setResetStep("request"); }} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            <h3 className="text-xl font-black text-white mb-1">🔑 Reset Your Password</h3>
+            {resetStep === "request" ? (
+              <form onSubmit={handleSendPasswordResetCode} className="flex flex-col gap-3 mt-3">
+                <p className="text-xs text-gray-300 leading-relaxed">Enter your username and the email address registered to your account to receive a 6-digit reset code.</p>
+                <input
+                  type="text"
+                  placeholder="Username / Handle"
+                  value={resetUsernameInput}
+                  onChange={(e) => setResetUsernameInput(e.target.value)}
+                  required
+                  className="w-full px-3 py-2.5 bg-black border border-gray-700 rounded-xl text-white text-xs"
+                />
+                <input
+                  type="email"
+                  placeholder="Registered Email Address"
+                  value={resetEmailInput}
+                  onChange={(e) => setResetEmailInput(e.target.value)}
+                  required
+                  className="w-full px-3 py-2.5 bg-black border border-gray-700 rounded-xl text-white text-xs"
+                />
+                <button type="submit" className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs uppercase rounded-xl cursor-pointer">
+                  Send Reset Code to Email
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleCompletePasswordReset} className="flex flex-col gap-3 mt-3">
+                <p className="text-xs text-gray-300">Enter the 6-digit code sent to your email and choose a new password (min 8 characters).</p>
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="6-digit Reset Code"
+                  value={resetCodeInput}
+                  onChange={(e) => setResetCodeInput(e.target.value)}
+                  required
+                  className="w-full px-3 py-2.5 bg-black border border-gray-700 rounded-xl text-white text-center font-mono text-sm tracking-widest"
+                />
+                <div className="relative">
+                  <input
+                    type={showResetPassword ? "text" : "password"}
+                    minLength={8}
+                    placeholder="New Password (min 8 chars)"
+                    value={resetNewPassword}
+                    onChange={(e) => setResetNewPassword(e.target.value)}
+                    required
+                    className="w-full px-3 py-2.5 pr-10 bg-black border border-gray-700 rounded-xl text-white text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword(!showResetPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer"
+                  >
+                    {showResetPassword ? "🙈" : "👁️"}
+                  </button>
+                </div>
+                <button type="submit" className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase rounded-xl cursor-pointer">
+                  Save New Password
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 911 EMERGENCY ASSIST MODAL */}
       {isEmergencyModalOpen && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-    <div className="bg-gray-900 border border-red-500/50 rounded-3xl p-6 max-w-md w-full text-white">
-      <h3 className="text-xl font-black text-red-400 mb-2">🚨 911 Emergency Assist</h3>
-      <p className="text-xs text-gray-300 mb-6">Choose an action below. Your emergency contact will receive your live GPS coordinates.</p>
-      
-      <div className="flex flex-col gap-3">
-        {/* Call 911 Direct Action */}
-        <a 
-          href="tel:911" 
-          className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl text-center transition-all"
-        >
-          📞 Call 911 Now
-        </a>
-        
-        {/* Live GPS Broadcast Button */}
-        <button 
-          onClick={handleBroadcastEmergency} 
-          className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer"
-        >
-          Broadcast Live GPS Alert to Safety Contacts
-        </button>
+        <div className="fixed inset-0 z-[290] flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-gray-900 border border-red-500/50 rounded-3xl p-6 max-w-md w-full text-white">
+            <h3 className="text-xl font-black text-red-400 mb-2">🚨 911 Emergency Assist</h3>
+            <p className="text-xs text-gray-300 mb-6">
+              Choose an action below. Broadcasting will immediately send your live GPS coordinates via both <strong>Email</strong> and <strong>Carrier SMS Text</strong> to <strong>{emergencyContactName || "your saved emergency contact"}</strong>.
+            </p>
+            
+            <div className="flex flex-col gap-3">
+              <a 
+                href="tel:911" 
+                className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl text-center transition-all"
+              >
+                📞 Call 911 Now
+              </a>
+              
+              <button 
+                onClick={() => handleBroadcastEmergency(false)} 
+                className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer"
+              >
+                📡 Broadcast Live GPS Alert (SMS + Email) to Safety Contact
+              </button>
 
-        <button 
-          onClick={() => setIsEmergencyModalOpen(false)} 
-          className="mt-2 text-xs text-gray-400 hover:text-white text-center cursor-pointer"
-        >
-          Cancel / Close
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+              <button 
+                onClick={() => setIsEmergencyModalOpen(false)} 
+                className="mt-2 text-xs text-gray-400 hover:text-white text-center cursor-pointer"
+              >
+                Cancel / Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* REPORT CHAT MODAL */}
       {isReportChatOpen && (
@@ -3843,20 +4122,20 @@ const searchGiphy = async (searchTerm: string) => {
         </div>
       )}
 
-   {/* ACCOUNT SETTINGS MODAL */}
+      {/* ACCOUNT SETTINGS MODAL (100% CLOUD SYNCED) */}
       {isAccountSettingsOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[250] p-4">
           <div className="bg-[#111827] border border-cyan-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar">
             <button onClick={() => setIsAccountSettingsOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
             <h3 className="text-2xl font-black text-white mb-1">Account Settings</h3>
-            <p className="text-xs text-gray-400 mb-6">Customize your profile selfie, status, emergency contact, and privacy settings.</p>
+            <p className="text-xs text-gray-400 mb-6">Customize your profile selfie, Discord link, emergency contact, and privacy settings.</p>
 
-            <div className="flex flex-col gap-5">
+            <form onSubmit={handleSaveAccountSettings} className="flex flex-col gap-5">
               
               <div className="bg-gray-900/80 p-4 rounded-2xl border border-gray-800 flex flex-col items-center">
                 <label className="block text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2 self-start">Profile Selfie (1:1 Ratio)</label>
                 <p className="text-[10px] text-amber-400 italic mb-3 self-start leading-relaxed">
-                  ⚠️ <strong>Content Policy:</strong> Uploaded selfies must be respectful. No weapons, No explicit content or nudity. (including cleavage)
+                  ⚠️ <strong>Content Policy:</strong> Uploaded selfies must be respectful. No weapons, No explicit content or nudity.
                 </p>
                 
                 <input type="file" ref={avatarInputRef} accept="image/*" onChange={handleAvatarFileChange} className="hidden" />
@@ -3879,10 +4158,10 @@ const searchGiphy = async (searchTerm: string) => {
 
               <div className="bg-gray-900/80 p-4 rounded-2xl border border-indigo-500/30 flex flex-col">
                 <label className="block text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1 flex items-center gap-2">
-                  <span>🎮</span> Discord Username / Server
+                  <span>🎮</span> Discord Username / Server Link
                 </label>
                 <p className="text-[10px] text-gray-400 mb-3 leading-relaxed">
-                  Link your personal Discord user ID (e.g., 123456789) or your group&apos;s server invite to display on your Zip Card.
+                  Paste your personal Discord profile link (or user ID) or your server invite (`discord.gg/...`) to display on your Zip Card and inside groups.
                 </p>
                 <input 
                   type="text" 
@@ -3891,47 +4170,37 @@ const searchGiphy = async (searchTerm: string) => {
                   onChange={(e) => setDiscordInviteUrl(e.target.value)} 
                   className="w-full px-4 py-3 bg-black border border-gray-700 rounded-xl text-white text-xs focus:border-indigo-500 transition-colors" 
                 />
-              </div>
 
-              <div className="mt-4 pt-4 border-t border-gray-800 flex flex-col gap-2">
-               <div className="flex items-center justify-between flex-wrap gap-2">
-                  <span className="text-sm text-gray-400">Discord Link:</span>
-                  {discordInviteUrl ? (
-                    <a 
-                      href={`https://${discordInviteUrl.replace(/^https?:\/\//, '')}`} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      title={discordInviteUrl}
-                      className="text-xs bg-indigo-950 text-indigo-300 border border-indigo-700 px-3 py-1 rounded-full font-bold flex items-center gap-1.5 hover:bg-indigo-900 transition-all shadow-sm"
-                    >
-                      <span>🎮</span> {discordInviteUrl.includes('/users/') ? 'Discord Profile' : 'Discord Server'} ↗
-                    </a>
-                  ) : (
-                    <span className="text-xs text-gray-500 italic">No link provided</span>
+                <div className="mt-3 pt-3 border-t border-gray-800 flex flex-col gap-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs text-gray-400">Preview Badge:</span>
+                    {discordInviteUrl && discordInviteUrl.trim() !== "" ? (
+                      <a 
+                        href={formatDiscordHref(discordInviteUrl)} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        title={discordInviteUrl}
+                        className="text-xs bg-indigo-950 text-indigo-300 border border-indigo-700 px-3 py-1 rounded-full font-bold flex items-center gap-1.5 hover:bg-indigo-900 transition-all shadow-sm"
+                      >
+                        <span>🎮</span> {discordInviteUrl.includes('/users/') || /^\d+$/.test(discordInviteUrl.trim()) ? 'Discord Profile' : 'Discord Server'} ↗
+                      </a>
+                    ) : (
+                      <span className="text-xs text-gray-500 italic">No link provided</span>
+                    )}
+                  </div>
+
+                  {discordInviteUrl && discordInviteUrl.trim() !== "" && (
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-300 mt-1">
+                      <input 
+                        type="checkbox" 
+                        checked={showDiscordOnCard} 
+                        onChange={(e) => setShowDiscordOnCard(e.target.checked)}
+                        className="w-4 h-4 rounded bg-gray-800 border-gray-700 text-indigo-600 cursor-pointer"
+                      />
+                      <span>Show Discord link on my Zip Friends card</span>
+                    </label>
                   )}
-               </div>
-
-               {discordInviteUrl && (
-                <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-300 mt-1">
-                  <input 
-                    type="checkbox" 
-                    checked={showDiscordOnCard} 
-                    onChange={async (e) => {
-                      const checked = e.target.checked;
-                      setShowDiscordOnCard(checked);
-                      if (userName) {
-                        try {
-                          await setDoc(doc(db, "users", userName.toLowerCase()), { showDiscordOnCard: checked }, { merge: true });
-                        } catch (err) {
-                          console.error("Error updating discord visibility:", err);
-                        }
-                      }
-                    }}
-                    className="w-4 h-4 rounded bg-gray-800 border-gray-700 text-indigo-600 cursor-pointer"
-                  />
-                  <span>Show Discord link on my Zip Friends card</span>
-                </label>
-               )}
+                </div>
               </div>
 
               {/* PERSONAL CONTACT INFO WITH PUBLIC TOGGLES */}
@@ -3971,31 +4240,40 @@ const searchGiphy = async (searchTerm: string) => {
                 </div>
               </div>
 
-              {/* CHANGE PASSWORD SECTION */}
+              {/* CHANGE PASSWORD SECTION (8+ CHARS & EYE TOGGLES) */}
               <div className="bg-gray-900/80 p-4 rounded-2xl border border-gray-800 flex flex-col gap-3">
-                <label className="block text-xs font-bold uppercase tracking-wider text-amber-400">🔒 Change Password</label>
-                <input 
-                  type="password" 
-                  placeholder="Current Password" 
-                  value={currentPasswordInput} 
-                  onChange={(e) => setCurrentPasswordInput(e.target.value)} 
-                  className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs" 
-                />
-                <input 
-                  type="password" 
-                  placeholder="New Password (min 6 chars)" 
-                  value={newPasswordInput} 
-                  onChange={(e) => setNewPasswordInput(e.target.value)} 
-                  className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs" 
-                />
+                <label className="block text-xs font-bold uppercase tracking-wider text-amber-400">🔒 Change Password (Min 8 Characters)</label>
+                <div className="relative">
+                  <input 
+                    type={showCurrentPassword ? "text" : "password"} 
+                    placeholder="Current Password" 
+                    value={currentPasswordInput} 
+                    onChange={(e) => setCurrentPasswordInput(e.target.value)} 
+                    className="w-full px-3 py-2 pr-10 bg-black border border-gray-700 rounded-xl text-white text-xs" 
+                  />
+                  <button type="button" onClick={() => setShowCurrentPassword(!showCurrentPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer">
+                    {showCurrentPassword ? "🙈" : "👁️"}
+                  </button>
+                </div>
+                <div className="relative">
+                  <input 
+                    type={showNewPassword ? "text" : "password"} 
+                    placeholder="New Password (min 8 chars)" 
+                    value={newPasswordInput} 
+                    onChange={(e) => setNewPasswordInput(e.target.value)} 
+                    className="w-full px-3 py-2 pr-10 bg-black border border-gray-700 rounded-xl text-white text-xs" 
+                  />
+                  <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer">
+                    {showNewPassword ? "🙈" : "👁️"}
+                  </button>
+                </div>
                 <button type="button" onClick={handleChangePassword} className="py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl cursor-pointer">Update Password</button>
               </div>
 
               <div className="bg-gray-900/80 p-4 rounded-2xl border border-gray-800 flex flex-col gap-3">
                 <label className="block text-xs font-bold uppercase tracking-wider text-emerald-400">🛡️ Safety Emergency Contact</label>
-                <p className="text-[10px] text-gray-400">Notified only if your safety check-in timer expires without confirmation.</p>
+                <p className="text-[10px] text-gray-400">Receives your live GPS alert via SMS Text & Email if you press 911 Assist or if your Safety Check-In timer expires.</p>
 
-                {/* Emergency Contact Name */}
                 <input 
                   type="text" 
                   placeholder="Emergency Contact Name" 
@@ -4004,11 +4282,10 @@ const searchGiphy = async (searchTerm: string) => {
                   className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs" 
                 />
 
-                {/* Phone Number & Carrier Dropdown Side-by-Side */}
                 <div className="grid grid-cols-2 gap-2">
                   <input 
                     type="tel" 
-                    placeholder="Contact Phone (SMS)" 
+                    placeholder="10-Digit Phone (for SMS)" 
                     value={emergencyContactPhone} 
                     onChange={(e) => setEmergencyContactPhone(e.target.value)} 
                     className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs" 
@@ -4028,7 +4305,6 @@ const searchGiphy = async (searchTerm: string) => {
                   </select>
                 </div>
 
-                {/* Emergency Contact Email */}
                 <input 
                   type="email" 
                   placeholder="Emergency Contact Email Address" 
@@ -4064,7 +4340,7 @@ const searchGiphy = async (searchTerm: string) => {
                       key={preset.name} 
                       type="button" 
                       onClick={() => setUserCardThemeGradient(preset.class)} 
-                      className={`p-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r ${preset.class} border ${userCardThemeGradient === preset.class ? 'border-cyan-400 ring-2 ring-cyan-400/50' : 'border-gray-800 opacity-80 hover:opacity-100'}`}
+                      className={`p-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r ${preset.class} border cursor-pointer ${userCardThemeGradient === preset.class ? 'border-cyan-400 ring-2 ring-cyan-400/50' : 'border-gray-800 opacity-80 hover:opacity-100'}`}
                     >
                       {preset.name}
                     </button>
@@ -4073,81 +4349,17 @@ const searchGiphy = async (searchTerm: string) => {
               </div>
 
               <button 
-                type="button" 
-                onClick={async () => {
-                  try {
-                    const settingsToSave = {
-                      isLoggedIn: true,
-                      userName,
-                      userEmail,
-                      userPhone,
-                      showEmailPublic,
-                      showPhonePublic,
-                      userStatus,
-                      userAge,
-                      userGender,
-                      showAgePublic,
-                      showGenderPublic,
-                      emergencyContactName,
-                      emergencyContactPhone,
-                      emergencyContactCarrier,
-                      emergencyContactEmail,
-                      userAvatarUrl,
-                      userCardBannerUrl,
-                      userCardThemeGradient,
-                      shippingAddress,
-                      discordInviteUrl,
-                      discordLinked: Boolean(discordInviteUrl.trim()),
-                      showDiscordOnCard,
-                      savedZips,
-                    };
-                    localStorage.setItem("zipgroups_user_settings_v1", JSON.stringify(settingsToSave));
-                  } catch (storageErr) {
-                    console.error("Local storage save warning:", storageErr);
-                  }
-
-                  // Close modal and notify immediately so UI never hangs
-                  setDiscordLinked(Boolean(discordInviteUrl.trim()));
-                  setIsAccountSettingsOpen(false);
-                  setNotification("✅ Profile, Account Settings & Card Style saved!");
-
-                  // Sync to Firestore in the background (non-blocking)
-                  if (userName) {
-                    try {
-                      await setDoc(doc(db, "users", userName.toLowerCase()), {
-                        userName,
-                        userEmail,
-                        userPhone,
-                        showEmailPublic,
-                        showPhonePublic,
-                        userStatus,
-                        userAge,
-                        userGender,
-                        showAgePublic,
-                        showGenderPublic,
-                        emergencyContactName,
-                        emergencyContactPhone,
-                        emergencyContactCarrier,
-                        emergencyContactEmail,
-                        userCardThemeGradient,
-                        discordInviteUrl,
-                        showDiscordOnCard,
-                      }, { merge: true });
-                    } catch (cloudErr) {
-                      console.error("Cloud sync note:", cloudErr);
-                    }
-                  }
-                }}
+                type="submit" 
                 className="mt-2 w-full py-3.5 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg cursor-pointer text-sm uppercase tracking-wider hover:opacity-90"
               >
-                Save Profile & Card Style
+                Save Profile & Card Style to Cloud
               </button>
 
               <div className="pt-6 mt-4 border-t border-gray-800">
                 <button 
                   type="button" 
                   onClick={async () => {
-                    if (window.confirm("⚠️ Are you sure you want to permanently delete your account? This will clear all data and make your username available again.")) {
+                    if (window.confirm("⚠️ Are you sure you want to permanently delete your account? This will erase your cloud profile and make your username available again.")) {
                       if (userName) {
                         try {
                           await deleteDoc(doc(db, "users", userName.toLowerCase()));
@@ -4155,13 +4367,7 @@ const searchGiphy = async (searchTerm: string) => {
                           console.error("Error deleting user document from cloud:", err);
                         }
                       }
-                      localStorage.clear();
-                      setIsLoggedIn(false);
-                      setUserName("");
-                      setUserHostedEvents(0);
-                      setIsAccountSettingsOpen(false);
-                      setNotification("Account permanently deleted and username released.");
-                      handleReset();
+                      wipeLocalStateAndLogout();
                     }
                   }} 
                   className="w-full py-3 bg-rose-950/60 hover:bg-rose-900/80 text-rose-400 font-bold text-xs rounded-xl border border-rose-800/80 transition-colors cursor-pointer"
@@ -4170,12 +4376,12 @@ const searchGiphy = async (searchTerm: string) => {
                 </button>
               </div>
 
-            </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* MANAGE SUBSCRIPTION MODAL (PAYPAL CHECKOUT) */}
+      {/* MANAGE SUBSCRIPTION MODAL */}
       {isManageSubOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[250] p-4">
           <div className="bg-[#111827] border border-amber-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar">
@@ -4229,7 +4435,7 @@ const searchGiphy = async (searchTerm: string) => {
                   className="mt-1 accent-amber-500 rounded cursor-pointer" 
                 />
                 <span className="text-xs text-amber-200/90 leading-relaxed font-medium">
-                  I understand that after my 7-day free trial ends, my account will be billed <strong>$15.00/month</strong>, and my official physical Host Pack will be shipped to the provided address upon payment.
+                  I understand that after my 7-day free trial ends, my account will be billed <strong>$15.00/month</strong>, and my official physical Host Pack will be shipped to the provided address after 3 active months.
                 </span>
               </label>
             </div>
@@ -4277,7 +4483,7 @@ const searchGiphy = async (searchTerm: string) => {
         </div>
       )}
 
-      {/* Guide & Legend Modal (UPDATED WITH SAFETY & 911 EXPLANATIONS) */}
+      {/* Guide & Legend Modal */}
       {isLegendOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[200] p-4">
           <div className="bg-[#111827] border border-cyan-500/40 rounded-3xl p-8 max-w-lg w-full shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar">
@@ -4290,35 +4496,35 @@ const searchGiphy = async (searchTerm: string) => {
                 <span className="text-3xl">🛡️</span>
                 <div>
                   <h4 className="font-bold text-white text-sm">Safety Check-In Feature</h4>
-                  <p className="text-xs text-gray-400">Toggle safety mode on to set check-in timers when attending meetups. If your timer expires without checking in, your designated emergency contact is alerted.</p>
+                  <p className="text-xs text-gray-400">Toggle safety mode on to set check-in timers when attending meetups. If your timer expires without checking in, your designated emergency contact is alerted via SMS & Email.</p>
                 </div>
               </div>
               <div className="bg-gray-900/60 p-4 rounded-xl border border-gray-800 flex gap-4 items-center">
                 <span className="text-3xl">🚨</span>
                 <div>
                   <h4 className="font-bold text-white text-sm">911 Assist Feature</h4>
-                  <p className="text-xs text-gray-400">Instantly open quick emergency dispatch options and broadcast alerts to your safety check-in contacts in case of an urgent threat.</p>
+                  <p className="text-xs text-gray-400">Instantly open quick emergency dispatch options and broadcast live GPS alerts to your safety check-in contacts.</p>
                 </div>
               </div>
               <div className="bg-gray-900/60 p-4 rounded-xl border border-gray-800 flex gap-4 items-center">
                 <span className="text-3xl">🔥</span>
                 <div>
                   <h4 className="font-bold text-white text-sm">Attendance Streak</h4>
-                  <p className="text-xs text-gray-400">Awarded to neighbors who consistently show up to events they RSVP for without flaking.</p>
+                  <p className="text-xs text-gray-400">Awarded to neighbors who consistently check in to events they RSVP for.</p>
                 </div>
               </div>
               <div className="bg-gray-900/60 p-4 rounded-xl border border-gray-800 flex gap-4 items-center">
                 <span className="text-3xl">⭐</span>
                 <div>
                   <h4 className="font-bold text-white text-sm">Stellar Member Rating</h4>
-                  <p className="text-xs text-gray-400">Awarded to members who bring requested potluck items and receive positive feedback from community hosts.</p>
+                  <p className="text-xs text-gray-400">Awarded to members who bring requested potluck items and contribute positively to local gatherings.</p>
                 </div>
               </div>
               <div className="bg-gray-900/60 p-4 rounded-xl border border-gray-800 flex gap-4 items-center">
                 <span className="text-3xl">👑</span>
                 <div>
                   <h4 className="font-bold text-white text-sm">Community Host</h4>
-                  <p className="text-xs text-gray-400">This user actively creates, organizes, and hosts neighborhood events. ($15/mo Host Membership)</p>
+                  <p className="text-xs text-gray-400">This user actively creates, organizes, and hosts neighborhood events ($15/mo Host Membership).</p>
                 </div>
               </div>
             </div>
@@ -4332,7 +4538,7 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="bg-[#111827] border border-cyan-500/40 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative">
             <button onClick={() => setIsSuggestOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
             <h3 className="text-2xl font-black text-white mb-2">Suggest a Group</h3>
-            <p className="text-xs text-gray-400 mb-6">Don't see your interest? Suggest a new neighborhood group category below.</p>
+            <p className="text-xs text-gray-400 mb-6">Don&apos;t see your interest? Suggest a new neighborhood group category below.</p>
             <form onSubmit={handleSuggestSubmit} className="flex flex-col gap-4">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2">Group Name</label>
@@ -4359,10 +4565,10 @@ const searchGiphy = async (searchTerm: string) => {
             <div className="bg-gray-900/80 border border-gray-700 rounded-xl p-3 mb-4">
               <div className="flex justify-between items-end mb-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">Host Tier: Bronze ($15/mo)</span>
-                <span className="text-[10px] text-gray-400">{userHostedEvents}/10 Events to Milestone Gift Card 🎁</span>
+                <span className="text-[10px] text-gray-400">{userHostedEvents}/10 Events to Milestone Reward 🎁</span>
               </div>
               <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-amber-400 h-full transition-all" style={{ width: `${(userHostedEvents / 10) * 100}%` }}></div>
+                <div className="bg-amber-400 h-full transition-all" style={{ width: `${Math.min(100, (userHostedEvents / 10) * 100)}%` }}></div>
               </div>
             </div>
             
@@ -4380,24 +4586,24 @@ const searchGiphy = async (searchTerm: string) => {
                     onChange={(e) => setDuplicateToAllZips(e.target.checked)} 
                     className="accent-cyan-500 rounded cursor-pointer" 
                   />
-                  <span className="text-xs text-gray-300 font-medium">Duplicate this event across all target zip codes</span>
+                  <span className="text-xs text-gray-300 font-medium">Broadcast this event across all target zip codes</span>
                 </label>
               </div>
 
-             <label className="flex items-center gap-3 cursor-pointer bg-black/40 border border-gray-800 p-3 rounded-xl">
-  <input 
-    type="checkbox" 
-    checked={isAdultOnly} 
-    onChange={(e) => setIsAdultOnly(e.target.checked)}
-    className="w-4 h-4 accent-cyan-500 rounded bg-black border-gray-700"
-  />
-  <div>
-    <p className="text-xs font-bold text-white">18+ Event Only</p>
-    <p className="text-[10px] text-gray-400">Restrict this event to adult members only.</p>
-  </div>
-</label>
+              <label className="flex items-center gap-3 cursor-pointer bg-black/40 border border-gray-800 p-3 rounded-xl">
+                <input 
+                  type="checkbox" 
+                  checked={isAdultOnly} 
+                  onChange={(e) => setIsAdultOnly(e.target.checked)}
+                  className="w-4 h-4 accent-cyan-500 rounded bg-black border-gray-700"
+                />
+                <div>
+                  <p className="text-xs font-bold text-white">18+ Event Only</p>
+                  <p className="text-[10px] text-gray-400">Restrict this event to adult members only.</p>
+                </div>
+              </label>
 
-            <div className="flex flex-col gap-1.5 bg-gray-900/60 p-3 rounded-xl border border-gray-800">
+              <div className="flex flex-col gap-1.5 bg-gray-900/60 p-3 rounded-xl border border-gray-800">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Select Group Category</label>
                   <select 
@@ -4414,18 +4620,18 @@ const searchGiphy = async (searchTerm: string) => {
 
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Event Title</label>
-                <input type="text" placeholder="e.g. BBQ at my house" value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                <input type="text" placeholder="e.g. Backyard BBQ & Board Games" value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Description & Details</label>
-                <textarea rows={2} placeholder="e.g. Bring your own Beer!" value={eventDesc} onChange={(e) => setEventDesc(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500 resize-none" />
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Description & Location Details</label>
+                <textarea rows={2} placeholder="e.g. Meet at Creekside Park Pavilion #2!" value={eventDesc} onChange={(e) => setEventDesc(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500 resize-none" />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Date</label>
-                  <input type="text" placeholder="e.g. 8/05/26" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                  <input type="text" placeholder="e.g. 11/15/26" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Time</label>
@@ -4456,7 +4662,7 @@ const searchGiphy = async (searchTerm: string) => {
               </div>
 
               <div className="flex flex-col gap-2 mt-2">
-                <button type="submit" className="w-full py-3 rounded-xl font-bold bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 text-white shadow-lg hover:opacity-95 transition-all cursor-pointer text-xs uppercase tracking-wider">Publish Local Event</button>
+                <button type="submit" className="w-full py-3 rounded-xl font-bold bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 text-white shadow-lg hover:opacity-95 transition-all cursor-pointer text-xs uppercase tracking-wider">Publish Local Event to Cloud</button>
               </div>
             </form>
           </div>
@@ -4490,14 +4696,15 @@ const searchGiphy = async (searchTerm: string) => {
         </div>
       )}
 
-      {/* Sign Up / Log In Modal (WITH RESET PASSWORD LINK) */}
+      {/* Sign Up / Log In Modal (WITH 8+ CHAR PASSWORDS, EYE TOGGLES & REAL RESET MODAL) */}
       {isAuthOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[200] p-4">
           <div className="bg-[#111827] border border-cyan-500/40 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar">
             <button onClick={() => setIsAuthOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
-            <h3 className="text-2xl font-black text-white mb-2">Account Registration</h3>
-            <p className="text-xs text-gray-400 mb-4">Please fill out your details to join neighborhood groups, favorite circles, and host gatherings.</p>
-          <div className="mb-4">
+            <h3 className="text-2xl font-black text-white mb-2">Account Access</h3>
+            <p className="text-xs text-gray-400 mb-4">Sign in to your cloud profile or register a new neighborhood account.</p>
+
+            <div className="mb-4">
               <div className="flex gap-2 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-3">
                 <button
                   type="button"
@@ -4531,13 +4738,33 @@ const searchGiphy = async (searchTerm: string) => {
                     onChange={(e) => setLoginUsername(e.target.value)}
                     className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-sm"
                   />
-                  <input
-                    type="password"
-                    placeholder="Your Password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-sm"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showLoginPassword ? "text" : "password"}
+                      placeholder="Your Password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleExistingLogin(); }}
+                      className="w-full px-3 py-2 pr-10 bg-black border border-gray-700 rounded-xl text-white text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer"
+                      title={showLoginPassword ? "Hide Password" : "Show Password"}
+                    >
+                      {showLoginPassword ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => { setIsAuthOpen(false); setIsResetModalOpen(true); }}
+                      className="text-[11px] text-amber-400 hover:underline cursor-pointer font-bold"
+                    >
+                      Forgot / Reset Password?
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onClick={handleExistingLogin}
@@ -4549,53 +4776,73 @@ const searchGiphy = async (searchTerm: string) => {
               )}
             </div>
 
-            <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
-              <div className="grid grid-cols-2 gap-2">
+            {!isLoginMode && (
+              <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">First Name</label>
+                    <input type="text" placeholder="First Name" value={firstNameInput} onChange={(e) => setFirstNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Last Name</label>
+                    <input type="text" placeholder="Last Name" value={lastNameInput} onChange={(e) => setLastNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">First Name</label>
-                  <input type="text" placeholder="Heather" value={firstNameInput} onChange={(e) => setFirstNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Username / Handle</label>
+                  <input type="text" placeholder="e.g. NeighborSam" value={userNameInput} onChange={(e) => setUserNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
                 </div>
+
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Last Name</label>
-                  <input type="text" placeholder="Schwalbach" value={lastNameInput} onChange={(e) => setLastNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Date of Birth</label>
+                  <input type="date" value={dobInput} onChange={(e) => setDobInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Username / Handle</label>
-                <input type="text" placeholder="e.g. HeatherS" value={userNameInput} onChange={(e) => setUserNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Date of Birth</label>
-                <input type="date" value={dobInput} onChange={(e) => setDobInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Email Address</label>
-                <input type="email" placeholder="heather@example.com" value={emailSignupInput} onChange={(e) => setEmailSignupInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Phone Number</label>
-                <input type="tel" placeholder="(614) 555-0192" value={phoneInput} onChange={(e) => setPhoneInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">Password</label>
-                  <button type="button" onClick={handleResetPasswordLink} className="text-[10px] text-amber-400 hover:underline cursor-pointer font-bold">Forgot / Reset Password?</button>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Email Address</label>
+                  <input type="email" placeholder="you@example.com" value={emailSignupInput} onChange={(e) => setEmailSignupInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
                 </div>
-                <input type="password" placeholder="••••••••" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
-              </div>
 
-              <div className="flex items-center gap-2 mt-1">
-                <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} id="rememberMeBox" className="accent-cyan-500 rounded cursor-pointer" />
-                <label htmlFor="rememberMeBox" className="text-xs text-gray-300 cursor-pointer">Remember me on this device</label>
-              </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Phone Number</label>
+                  <input type="tel" placeholder="(614) 555-0192" value={phoneInput} onChange={(e) => setPhoneInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                </div>
 
-              <button type="submit" className="mt-3 w-full py-3.5 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg cursor-pointer text-xs uppercase tracking-wider hover:opacity-90">Create Account & Register</button>
-            </form>
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">Password (Min 8 Characters)</label>
+                    <button type="button" onClick={() => { setIsAuthOpen(false); setIsResetModalOpen(true); }} className="text-[10px] text-amber-400 hover:underline cursor-pointer font-bold">Forgot Password?</button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showSignupPassword ? "text" : "password"}
+                      minLength={8}
+                      placeholder="At least 8 characters"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 pr-10 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupPassword(!showSignupPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer"
+                      title={showSignupPassword ? "Hide Password" : "Show Password"}
+                    >
+                      {showSignupPassword ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 mt-1">
+                  <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} id="rememberMeBox" className="accent-cyan-500 rounded cursor-pointer" />
+                  <label htmlFor="rememberMeBox" className="text-xs text-gray-300 cursor-pointer">Remember me on this device</label>
+                </div>
+
+                <button type="submit" className="mt-3 w-full py-3.5 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg cursor-pointer text-xs uppercase tracking-wider hover:opacity-90">Create Cloud Account</button>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -4606,7 +4853,7 @@ const searchGiphy = async (searchTerm: string) => {
           <div className="bg-[#111827] border border-pink-500/40 rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
             <button onClick={() => setIsUploadOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
             <h3 className="text-2xl font-black text-white mb-1">Upload to Gallery</h3>
-            <p className="text-[11px] text-gray-400 mb-6">Host feature: Share moments from your recent gatherings with the local zip code.</p>
+            <p className="text-[11px] text-gray-400 mb-6">Share moments from your recent gatherings with the community.</p>
             
             <form onSubmit={handleUploadSubmit} className="flex flex-col gap-4">
               <input type="file" ref={fileInputRef} accept="image/*" onChange={handleFileChange} className="hidden" />
@@ -4616,11 +4863,11 @@ const searchGiphy = async (searchTerm: string) => {
                 className="w-full h-36 rounded-xl border-2 border-dashed border-gray-700 hover:border-pink-500 flex flex-col items-center justify-center bg-gray-900/50 cursor-pointer transition-colors relative overflow-hidden"
               >
                 {previewUploadUrl ? (
-                  <Image src={previewUploadUrl} alt="Upload Preview" fill className="object-cover" unoptimized />
+                  <img src={previewUploadUrl} alt="Upload Preview" className="w-full h-full object-cover" />
                 ) : (
                   <div className="text-center p-4">
                     <span className="text-3xl mb-1 inline-block">📥</span>
-                    <p className="text-xs text-pink-400 font-bold">Click to open file folder / select photo</p>
+                    <p className="text-xs text-pink-400 font-bold">Click to select photo from your device</p>
                   </div>
                 )}
               </div>
@@ -4628,7 +4875,7 @@ const searchGiphy = async (searchTerm: string) => {
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-pink-400 mb-1">Select Group</label>
                 <select value={uploadGroup} onChange={(e) => setUploadGroup(e.target.value)} required className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-pink-500">
-                  <option value="" disabled>Choose a group you host...</option>
+                  <option value="" disabled>Choose a group category...</option>
                   {uniqueGroupNames.map(name => (<option key={name} value={name}>{name}</option>))}
                 </select>
               </div>
@@ -4636,13 +4883,13 @@ const searchGiphy = async (searchTerm: string) => {
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-pink-400 mb-1">Caption</label>
                 <input type="text" placeholder="e.g. Amazing turnout at the park today!" value={uploadCaption} onChange={(e) => setUploadCaption(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-pink-500" />
               </div>
-              <button type="submit" className="mt-2 w-full py-3 rounded-xl font-bold bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-lg cursor-pointer text-xs uppercase tracking-wider hover:opacity-90">Publish to Event Gallery</button>
+              <button type="submit" className="mt-2 w-full py-3 rounded-xl font-bold bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-lg cursor-pointer text-xs uppercase tracking-wider hover:opacity-90">Publish to Cloud Gallery</button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Partner Application Modal ($35/mo PayPal + Email Dispatch) */}
+      {/* Partner Application Modal */}
       {isPartnerModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[200] p-4 overflow-y-auto">
           <div className="bg-[#111827] border border-amber-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative my-6 max-h-[90vh] overflow-y-auto custom-scrollbar">
@@ -4692,23 +4939,91 @@ const searchGiphy = async (searchTerm: string) => {
         </div>
       )}
 
-      {/* Universal Legal Footer WITH CONTACT US & SUGGEST GROUP */}
+      {/* FULL LEGAL, PRIVACY, TERMS & GUIDELINES MODAL */}
+      {activeLegalModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[295] p-4">
+          <div className="bg-[#111827] border border-cyan-500/40 rounded-3xl p-6 md:p-8 max-w-2xl w-full shadow-2xl relative max-h-[85vh] overflow-y-auto custom-scrollbar text-left">
+            <button onClick={() => setActiveLegalModal(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            
+            {activeLegalModal === "terms" && (
+              <>
+                <h3 className="text-2xl font-black text-white mb-2">Terms & Conditions of Use</h3>
+                <p className="text-xs text-cyan-400 mb-4">Effective Date: {new Date().getFullYear()} &bull; Zip Groups Inc. (myzipgroups.com)</p>
+                <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
+                  <p><strong>1. Acceptance of Terms:</strong> By accessing or using Zip Groups, creating an account, joining a neighborhood circle, or attending any gathering posted on the platform, you agree to be bound by these Terms & Conditions.</p>
+                  <p><strong>2. Age & Eligibility Requirements:</strong> Users must be at least 13 years of age. Users ages 13–17 are restricted to designated Teen categories and may not RSVP to or attend 18+ restricted gatherings. Misrepresenting your age or date of birth is grounds for immediate account termination.</p>
+                  <p><strong>3. Assumption of Risk & Offline Meetups:</strong> Zip Groups is solely a digital directory and communication facilitator. Zip Groups does not vet, background-check, or supervise individual members, hosts, or offline gatherings. You assume 100% of the personal, physical, and financial risk associated with meeting people offline or attending any venue or residence.</p>
+                  <p><strong>4. Host Subscriptions & Merchandise:</strong> Host Memberships ($15/month following a 7-day trial) and Venue Partnerships ($35/month) are billed via PayPal and may be canceled at any time. Physical Host Welcome Kits are unlocked free after 3 consecutive monthly host subscription payments or may be purchased directly in the Zip Shop.</p>
+                  <p><strong>5. Account Termination:</strong> We reserve the right to suspend or permanently remove any account that violates our zero-tolerance policies against harassment, threats, doxxing, spam, or illegal conduct.</p>
+                </div>
+              </>
+            )}
+
+            {activeLegalModal === "privacy" && (
+              <>
+                <h3 className="text-2xl font-black text-white mb-2">Privacy Policy</h3>
+                <p className="text-xs text-cyan-400 mb-4">How Zip Groups Protects Your Neighborhood Data</p>
+                <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
+                  <p><strong>1. Information We Collect:</strong> We collect the profile information you voluntarily provide (username, name, date of birth for age-tier verification, email address, phone number, optional profile selfie, optional Discord link, and optional emergency contact details).</p>
+                  <p><strong>2. Public vs. Private Control:</strong> Your email address and phone number are hidden from your Zip Friend card by default and are only displayed if you explicitly check &ldquo;Make Public on Card&rdquo; in Account Settings.</p>
+                  <p><strong>3. Emergency GPS & Safety Data:</strong> Live GPS coordinates are only requested when you actively trigger the 911 Emergency Assist broadcast or when an active Safety Check-In timer expires without confirmation, and are transmitted solely to your designated emergency contact.</p>
+                  <p><strong>4. Right to Deletion:</strong> You may permanently delete your cloud account and release your username at any time using the &ldquo;Delete Account Permanently&rdquo; button inside Account Settings.</p>
+                </div>
+              </>
+            )}
+
+            {activeLegalModal === "guidelines" && (
+              <>
+                <h3 className="text-2xl font-black text-white mb-2">Community & Safety Guidelines</h3>
+                <p className="text-xs text-emerald-400 mb-4">Building Safe, Welcoming Local Circles</p>
+                <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
+                  <p><strong>1. Meet in Public Spaces First:</strong> Always hold initial gatherings in well-lit public locations such as verified local partner cafes, parks, libraries, or restaurants. We strongly recommend a minimum of 4 confirmed RSVPs for every gathering.</p>
+                  <p><strong>2. Use the Built-In Safety Suite:</strong> Before heading to a meetup, configure your Safety Emergency Contact in Account Settings and toggle on <strong>🛡️ Safety Mode</strong> so a trusted contact is automatically notified if you do not check in.</p>
+                  <p><strong>3. Zero Tolerance for Harassment or Hate:</strong> Hate speech, racial slurs, bullying, stalking, unwanted solicitation, crypto/financial scams, and explicit content are strictly prohibited in group chats, direct messages, and photo uploads.</p>
+                  <p><strong>4. Respectful Selfies & Media:</strong> Profile selfies and Event Gallery uploads must be family-friendly and respectful (no weapons, nudity, or explicit imagery).</p>
+                </div>
+              </>
+            )}
+
+            {activeLegalModal === "disclaimer" && (
+              <>
+                <h3 className="text-2xl font-black text-amber-400 mb-2">⚠️ Legal Liability Disclaimer & 911 Notice</h3>
+                <p className="text-xs text-gray-400 mb-4">Important Legal Notice for All Zip Groups Users</p>
+                <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
+                  <p><strong>1. Release of Liability:</strong> To the maximum extent permitted by law, Zip Groups Inc., its founders, creators, and affiliates shall not be liable for any injury, loss, claim, property damage, or incident arising out of or connected with any online interaction, carpool arrangement, or offline meetup organized through the platform.</p>
+                  <p><strong>2. Safety Tools Are Supplemental:</strong> The Safety Check-In Timer and 911 Assist GPS Broadcast features rely on browser permissions, cellular carrier email-to-SMS gateways, and internet connectivity. They are supplemental convenience tools and <strong>do not replace calling 911 directly</strong> in a life-threatening emergency.</p>
+                  <p><strong>3. Third-Party Links & Venues:</strong> External links (including user-submitted Discord servers, profiles, and local partner venues) are operated by third parties outside of Zip Groups&apos; control.</p>
+                </div>
+              </>
+            )}
+
+            <button onClick={() => setActiveLegalModal(null)} className="mt-6 w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs uppercase rounded-xl cursor-pointer">
+              Close Window
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Universal Legal Footer WITH FULL CLICKABLE LEGAL MODALS */}
       <footer className="w-full max-w-6xl text-center py-10 mt-16 border-t border-gray-800/60 text-xs text-gray-500 z-10 flex flex-col gap-4">
         <div className="flex justify-center flex-wrap gap-6 font-medium">
           <span onClick={() => setIsSuggestOpen(true)} className="hover:text-cyan-400 cursor-pointer transition-colors text-cyan-300 font-bold">+ Suggest Group</span>
           <a href="mailto:contactzipgroups@gmail.com" className="hover:text-cyan-400 cursor-pointer transition-colors text-cyan-300 font-bold">Contact Us</a>
-          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setNotification("Terms & Conditions: Zero tolerance for hate speech, violence, or slurs.")}>Terms & Conditions</span>
-          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setNotification("Privacy Policy: Your data and exact Zip Code are protected.")}>Privacy Policy</span>
-          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setNotification("Community Guidelines: Always meet in well-lit public spaces.")}>Community Guidelines</span>
+          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setActiveLegalModal("terms")}>Terms & Conditions</span>
+          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setActiveLegalModal("privacy")}>Privacy Policy</span>
+          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setActiveLegalModal("guidelines")}>Community Guidelines</span>
+          <span className="hover:text-amber-400 cursor-pointer transition-colors text-amber-400/90" onClick={() => setActiveLegalModal("disclaimer")}>Liability & Safety Disclaimer</span>
         </div>
-        <p className="max-w-2xl mx-auto leading-relaxed text-[10px]">
-          ⚠️ <strong className="text-gray-400">Disclaimer:</strong> Zip Groups is a digital platform connecting local neighbors. We are not liable for offline interactions, incidents, or disputes. Always exercise caution, meet in well-lit public areas, and review our Safety Guidelines. We enforce a strict zero-tolerance policy against hate speech, harassment, and scams.
+        <p className="max-w-3xl mx-auto leading-relaxed text-[10px] text-gray-400">
+          ⚠️ <strong className="text-gray-300">Official Platform Disclaimer:</strong> Zip Groups is a digital platform connecting local neighbors and does not conduct criminal background checks or supervise offline events. We are not liable for offline interactions, carpools, incidents, or disputes. Always exercise caution, meet in well-lit public areas (4+ attendees recommended), and dial 911 directly in an emergency. Zero tolerance for hate speech, harassment, or scams.
         </p>
         <button onClick={() => setIsReviewOpen(true)} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold rounded-xl border border-gray-700 transition-all cursor-pointer w-fit mx-auto mt-2">
           Leave a Review
         </button>
-        <p>&copy; {new Date().getFullYear()} Zip Groups Inc. &bull; Building Local Communities.</p>
+        <p>&copy; {new Date().getFullYear()} Zip Groups Inc. &bull; Building Local Communities Nationwide.</p>
       </footer>
+    </>
+      )}
     </main>
   );
 }
