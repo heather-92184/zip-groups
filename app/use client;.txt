@@ -1,0 +1,3099 @@
+"use client";
+
+import Image from "next/image";
+import { useState, useMemo, useEffect, useRef } from "react";
+
+// --- PERSISTENT STORAGE IMPORTS (LOCAL OR FIRESTORE) ---
+import { db } from "../lib/firebase";
+import { collection, addDoc, onSnapshot, query, orderBy, doc, setDoc, getDoc, deleteDoc, where } from "firebase/firestore";
+
+interface ChatMessage {
+  id: number;
+  user: string;
+  isHost: boolean;
+  time: string;
+  timestamp: number;
+  text: string;
+  color: string;
+}
+
+interface ChecklistItem {
+  id: string;
+  name: string;
+  claimedBy?: string;
+}
+
+interface GroupEvent {
+  id: string;
+  groupId?: string;
+  zipCode?: string;
+  groupName?: string;
+  title?: string;
+  description?: string;
+  text: string;
+  color: string;
+  host?: string;
+  locationName?: string;
+  isVerifiedVenue?: boolean;
+  venuePerk?: string;
+  checklist?: ChecklistItem[];
+  expirationDate?: string;
+  isAdultOnly?: boolean;
+  rsvps?: string[];
+}
+
+interface CommunityGroup {
+  id: string;
+  zipCode: string;
+  name: string;
+  category: string;
+  location: string;
+  members: number;
+  description: string;
+  events: (string | GroupEvent)[];
+  icon: string;
+  color: string;
+  glow: string;
+  chatMessages: ChatMessage[];
+  isHostOnly?: boolean;
+}
+
+interface ZipFriend {
+  id: string;
+  name: string;
+  handle: string;
+  status: "Online" | "Busy" | "Show Offline" | "At an event";
+  mutualGroups: number;
+  avatarColor: string;
+  avatarInitials: string;
+  avatarUrl?: string;
+  cardBannerUrl?: string;
+  cardThemeGradient?: string;
+  hostedCount: number;
+  streak: number;
+  stellarRating: number;
+  stellarReviews: number;
+  ageCategory?: string;
+  isFounder?: boolean;
+  isBot?: boolean;
+  titleBadge?: string;
+  isDefault?: boolean;
+  email?: string;
+  phone?: string;
+  showEmailPublic?: boolean;
+  showPhonePublic?: boolean;
+  discordInviteUrl?: string;
+  discordLinked?: boolean;
+  showDiscordOnCard?: boolean;
+}
+
+interface GalleryPhoto {
+  id: string;
+  groupId: string;
+  groupName: string;
+  imageUrl: string; 
+  caption: string;
+  uploadedBy: string;
+  date: string;
+  timestamp?: number;
+}
+
+interface LocalVenuePartner {
+  id: string;
+  name: string;
+  type: string;
+  perk: string;
+  zipCode: string;
+  address: string;
+  imageBg: string;
+}
+
+interface Review {
+  id: string;
+  userName: string;
+  rating: number;
+  text: string;
+  date: string;
+  timestamp?: number;
+}
+
+interface ShopItem {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  images: string[];
+  video?: string;
+  sizes?: string[];
+  description: string;
+  isHostMembership?: boolean;
+}
+
+interface CartItem extends ShopItem {
+  cartId: string;
+  selectedSize?: string;
+  selectedDesign: string;
+  customName?: string;
+  customColor?: string;
+  customColorName?: string;
+  quantity: number;
+}
+
+const compressImageFile = (file: File, maxWidth = 500, maxHeight = 500, quality = 0.8): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(event.target?.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = (err) => reject(err);
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+};
+
+const formatDiscordHref = (rawUrl?: string) => {
+  if (!rawUrl) return "#";
+  const trimmed = rawUrl.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return `https://discord.com/users/${trimmed}`;
+  }
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  return `https://${trimmed.replace(/^\/+/, "")}`;
+};
+
+const SHOP_ITEMS: ShopItem[] = [
+  { id: "s-host", name: "Zip Host Membership ($15/mo)", price: 15, category: "Host Gear", images: ["/zip-host-logo.png"], description: "Unlock unlimited event broadcasting, verified host badge, and earn your physical Host Welcome Kit FREE after 3 active months!", isHostMembership: true },
+  { id: "s-host-kit", name: "Official Host Welcome Kit Bundle", price: 30, category: "Host Gear", images: ["/host-kit.png"], description: "Complete physical starter pack (Tote, Table Sign, Lanyards). Buy now for Day 1 or unlock FREE after 3 active months as a Host!" },
+  { id: "s1", name: "Zip Groups Custom T-Shirt", price: 15, category: "Apparel", images: ["/Personalized-T-Shirt.png", "/zip-host-tshirt.png"], sizes: ["S", "M", "L", "XL", "XXL", "XXXL"], description: "Premium cotton tee with customized zip logo." },
+  { id: "s2", name: "Classic Ceramic Coffee Mug", price: 8, category: "Drinkware", images: ["/personalized-logo-mug.png"], video: "/zip-coffee-mug.mp4", description: "11oz ceramic mug for morning brews and meetups." },
+  { id: "s3", name: "Zip Groups Trucker Hat", price: 10, category: "Apparel", images: ["/personalized-trucker-hat.png"], description: "Breathable mesh snapback trucker hat." },
+  { id: "s4", name: "Host Lanyard + 4 Member Lanyards", price: 20, category: "Host Gear", images: ["/zip-host-4-member-lanyards.png"], description: "Complete event lanyard kit for hosts and members." },
+  { id: "s5", name: "5-Pack Member Lanyards", price: 20, category: "Accessories", images: ["/5member-lanyards.png"], description: "Set of 5 durable branded member lanyards." },
+  { id: "s6", name: "Neighborhood Dog Bandana", price: 8, category: "Pets", images: ["/dog-bandana.png"], sizes: ["XS", "S", "M", "L", "XL"], description: "Stylish pet bandana for furry event companions." },
+  { id: "s7", name: "Weatherproof Yard Sign", price: 12, category: "Host Gear", images: ["/zip-groups-yard-sign.png"], description: "Corrugated plastic yard sign with stake." },
+  { id: "s8", name: "Canvas Tote Bag", price: 10, category: "Accessories", images: ["/tote-bag2.png", "/zip-host-tote-bag.png"], description: "Durable cotton canvas tote for thrifting and books." },
+  { id: "s9", name: "Custom Playing Cards", price: 10, category: "Gaming", images: ["/playing-cards3.png"], description: "Standard deck for game nights and tabletop meetups." },
+  { id: "s10", name: "Acrylic Table Sign", price: 8, category: "Host Gear", images: ["/zip-host-table-sign.png"], description: "Tabletop sign for local meetup spot reservations." },
+  { id: "s11", name: "20oz Stainless Steel Water Bottle", price: 15, category: "Drinkware", images: ["/Stainless%20Steel%20water%20Bottle%20with%20logo%20only....png"], description: "Insulated bottle to keep drinks cold during hikes." },
+  { id: "s12", name: "Community Clipboard", price: 8, category: "Accessories", images: ["/clipboard.png"], description: "Sturdy clipboard for event check-ins and sign-ups." },
+  { id: "s13", name: "Insulated Wine Tumbler", price: 12, category: "Drinkware", images: ["/wine-tumblers.png"], description: "Stainless steel tumbler for outdoor socials." },
+];
+
+const DESIGNS = [
+  "Zip Groups (Standard)",
+  "Zip Groups (Personalized)",
+  "Zip Host (Standard)",
+  "Zip Host (Personalized)"
+];
+
+const THREAT_REGEX = /\b(i will|im gonna|i am going to)\s*(hurt|find|stalk|dox)\s*(you)\b/i;
+const HARASSMENT_REGEX = /\b(kill yourself|die loser|worthless human)\b/i;
+const LINK_REGEX = /\b(https?:\/\/)?([\w\-]+\.)+(com|net|org|xyz|ru|tk|club|info)\b|dot\s*(com|net|org)/i;
+const SCAM_REGEX = /\b(free\s*crypto|dm\s*me\s*for\s*cash|whatsapp\s*me|telegram\s*me|get\s*rich\s*fast)\b/i;
+
+const MOCK_PARTNER_VENUES: LocalVenuePartner[] = [
+  { id: "v1", name: "Nostalgia Lounge & Cafe", type: "Cocktail Bar & Lounge", perk: "15% off wine flights for Zip Groups", zipCode: "43230", address: "102 Mill St, Gahanna, OH", imageBg: "bg-purple-900" },
+  { id: "v2", name: "Level Up Arcade Bar", type: "Barcade & Gaming Lounge", perk: "Free $5 token card with any drink purchase", zipCode: "43230", address: "450 Hamilton Rd, Gahanna, OH", imageBg: "bg-indigo-900" },
+  { id: "v3", name: "The Daily Grind Coffee Co.", type: "Cafe & Bakery", perk: "10% off group coffee & pastry orders", zipCode: "43230", address: "78 N St, Gahanna, OH", imageBg: "bg-amber-900" },
+  { id: "v4", name: "Metro Park Pavilion #3", type: "Public Park & Trails", perk: "Free public grill access & group reservation", zipCode: "43230", address: "Inniswood Metro Gardens", imageBg: "bg-emerald-900" },
+];
+
+const INITIAL_PHOTOS: GalleryPhoto[] = [];
+
+const ZIP_BOT_FRIEND: ZipFriend = { 
+  id: "f-zipbot", 
+  name: "Zip Bot", 
+  handle: "@zipbot_faq", 
+  status: "Online", 
+  mutualGroups: 0, 
+  avatarColor: "bg-gradient-to-tr from-cyan-600 to-emerald-600", 
+  avatarInitials: "ZB", 
+  hostedCount: 0, 
+  streak: 99, 
+  stellarRating: 5.0, 
+  stellarReviews: 0, 
+  isBot: true,
+  isDefault: true,
+  titleBadge: "Official FAQ Assistant",
+  cardThemeGradient: "from-cyan-950 via-gray-900 to-black"
+};
+
+const INITIAL_REVIEWS: Review[] = [];
+
+const FULL_EMOJI_LIST = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😋", "😛", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🤩", "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔", "🤭", "🤫", "🤥", "😶", "😐", "😑", "😬", "🙄", "😯", "😦", "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😵", "🤐", "🥴", "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👹", "👺", "🤡", "💩", "👻", "💀", "👽", "👾", "🤖", "🎃", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾", "👋", "🤚", "🖐️", "✋", "🖖", "👌", "🤌", "🤏", "✌️", "🤞", "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝️", "👍", "👎", "✊", "👊", "🤛", "🤜", "👏", "🙌", "👐", "🤲", "🤝", "🙏", "✍️", "💅", "🤳", "💪", "🦾", "🦿", "🦵", "🦶", "👂", "🦻", "👃", "🧠", "🫀", "🫁", "🦷", "🦴", "👀", "👁️", "👅", "👄", "💋", "👑", "🔥", "🍷", "🃏", "🍺", "☕", "🎉", "⭐", "🚗", "🚶"];
+
+const CARD_GRADIENT_PRESETS = [
+  { name: "Cyan Spark", class: "from-cyan-900 via-gray-900 to-black" },
+  { name: "Purple Night", class: "from-purple-950 via-indigo-950 to-black" },
+  { name: "Sunset Amber", class: "from-amber-950 via-gray-900 to-black" },
+  { name: "Emerald Mint", class: "from-emerald-950 via-gray-900 to-black" },
+  { name: "Pink Neon", class: "from-pink-950 via-rose-950 to-black" },
+];
+
+const THEME_COLORS = [
+  { name: "Cyan Spark", class: "border-cyan-500/40 text-cyan-400 bg-cyan-950/80", glow: "shadow-[0_0_15px_rgba(6,182,212,0.35)]", textColor: "text-cyan-400" },
+  { name: "Purple Vibe", class: "border-purple-500/40 text-purple-400 bg-purple-950/80", glow: "shadow-[0_0_15px_rgba(168,85,247,0.35)]", textColor: "text-purple-400" },
+  { name: "Pink Neon", class: "border-pink-500/40 text-pink-400 bg-pink-950/80", glow: "shadow-[0_0_15px_rgba(236,72,153,0.35)]", textColor: "text-pink-400" },
+  { name: "Blue Royal", class: "border-blue-500/40 text-blue-400 bg-blue-950/80", glow: "shadow-[0_0_15px_rgba(59,130,246,0.35)]", textColor: "text-blue-400" },
+  { name: "Amber Sunset", class: "border-amber-500/40 text-amber-400 bg-amber-950/80", glow: "shadow-[0_0_15px_rgba(245,158,11,0.35)]", textColor: "text-amber-400" },
+  { name: "Emerald Mint", class: "border-emerald-500/40 text-emerald-400 bg-emerald-950/80", glow: "shadow-[0_0_15px_rgba(16,185,129,0.35)]", textColor: "text-emerald-400" },
+  { name: "Red Ember", class: "border-red-500/40 text-red-400 bg-red-950/80", glow: "shadow-[0_0_15px_rgba(239,68,68,0.35)]", textColor: "text-red-400" },
+];
+
+const CHAT_FONT_STYLES = [
+  { name: "Matrix Green", class: "text-emerald-400 font-mono font-bold" },
+  { name: "Hot Pink", class: "text-pink-400 font-sans font-black" },
+  { name: "Electric Blue", class: "text-cyan-400 font-mono tracking-wide" },
+  { name: "Retro Gold", class: "text-amber-400 font-serif italic font-bold" },
+  { name: "Neon Purple", class: "text-purple-400 font-sans font-semibold" },
+];
+
+const HOST_HQ_GROUP: CommunityGroup = {
+  id: "host-hq-global",
+  zipCode: "HQ",
+  name: "Zip Hosts Connect",
+  category: "Support",
+  location: "National Host Portal",
+  members: 0,
+  description: "Exclusive portal for verified Zip Hosts to share tips, coordinate multi-zip events, and get direct support from the core team.",
+  events: [],
+  icon: "👑",
+  color: "border-amber-500/40 text-amber-400 bg-amber-950/80",
+  glow: "shadow-[0_0_15px_rgba(245,158,11,0.35)]",
+  isHostOnly: true,
+  chatMessages: []
+};
+
+const isChatActiveWithin2Mins = (messages: ChatMessage[]) => {
+  if (!messages || messages.length === 0) return false;
+  const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+  return messages.some(msg => msg.timestamp && msg.timestamp >= twoMinutesAgo);
+};
+
+const getValidEvents = (events: (string | GroupEvent)[]) => {
+  return events.filter(evt => {
+    if (typeof evt === 'string') return true;
+    if ((evt as any).isCancelled) return false;
+    if (!evt.expirationDate) return true;
+    return new Date(evt.expirationDate) >= new Date(); 
+  });
+};
+
+const generateGroupsForZip = (zip: string): CommunityGroup[] => {
+  const templates = [
+    { name: "Men's Circle", category: "Social", icon: "🃏", colorIdx: 3, desc: "Neighborhood hangouts, BYOB and chill, backyard pool parties, and card game nights." },
+    { name: "Women's Circle", category: "Social", icon: "🍷", colorIdx: 2, desc: "Relaxed neighborhood get-togethers, hosting dinners, wine nights, and weekend brunches." },
+    { name: "LGBTQ+ Circle", category: "Social", icon: "🌈", colorIdx: 2, desc: "A welcoming, inclusive space for local LGBTQ+ neighbors and allies to connect, chat, and hang out." },
+    { name: "Nothing But Nostalgia", category: "Social", icon: "📻", colorIdx: 1, desc: "Throwback music, retro gaming, Y2K culture, vintage thrifting, and 80s/90s nostalgia hangouts." },
+    { name: "Shopping & Thrifting", category: "Social", icon: "🛍️", colorIdx: 3, desc: "Weekend thrift store runs, vintage hunting, mall trips, and sharing local deals." },
+    { name: "Event Buddies", category: "Social", icon: "🎟️", colorIdx: 0, desc: "Never go to concerts, festivals, or local events alone again. Find a trusted neighborhood buddy to go with!" },
+    { name: "Single Parents Circle", category: "Family", icon: "👨‍👧‍👦", colorIdx: 0, desc: "Support, playdates, and social events for single moms and dads. Build your local village." },
+    { name: "Singles Mingle", category: "Social", icon: "🔥", colorIdx: 6, desc: "Low-pressure meetups, mixers, and activities for singles in the area." },
+    { name: "Couples & Double Dates", category: "Social", icon: "🥂", colorIdx: 2, desc: "Meet other couples for game nights, dinners, and double dates." },
+    { name: "Empty Nesters", category: "Social", icon: "☕", colorIdx: 5, desc: "Relaxed social gatherings, dinners, and outings for parents enjoying their next chapter." },
+    { name: "Children's Playdates", category: "Family", icon: "🧸", colorIdx: 0, desc: "Local playground gatherings, park hangouts, and easy social fun for the kids." },
+    { name: "Teens Only Circle", category: "Family", icon: "🎧", colorIdx: 1, desc: "A safe, moderated space for local teenagers to find study buddies, gaming partners, and park hangouts." },
+    { name: "Pet Play dates", category: "Community", icon: "🐕", colorIdx: 4, desc: "Socializing our furry friends at local dog parks and neighborhood walking paths." },
+    { name: "Holiday Hangouts", category: "Community", icon: "🎄", colorIdx: 4, desc: "Seasonal gatherings, neighborhood holiday lights walks, potlucks, and festive celebrations." },
+    { name: "All Religions Welcome Circle", category: "Support", icon: "🕊️", colorIdx: 3, desc: "An open, respectful interfaith space for neighbors of all religious backgrounds and spiritual journeys." },
+    { name: "Cafe/Restaurants (Foodies)", category: "Dining", icon: "🌮", colorIdx: 4, desc: "Exploring hidden gem cafes, trying new restaurants, and sharing local foodie reviews." },
+    { name: "Parks/Hiking", category: "Outdoors", icon: "🌲", colorIdx: 5, desc: "Weekend trail walks, scenic park gatherings, and fresh air adventures." },
+    { name: "Sports and Fitness", category: "Fitness", icon: "⚽", colorIdx: 5, desc: "Local running groups, pickup basketball, gym accountability partners, and outdoor fitness sessions." },
+    { name: "Hobbies & Crafts", category: "Creative", icon: "🎨", colorIdx: 2, desc: "Knitting circles, DIY crafting, painting, thrifting, and creative hobby meetups." },
+    { name: "Board games & tabletop LFG", category: "Gaming", icon: "🎲", colorIdx: 6, desc: "Gatherings for Catan, Ticket to Ride, D&D, and trying out new tabletop games." },
+    { name: "Arcades / Barcades", category: "Gaming", icon: "🕹️", colorIdx: 1, desc: "Weekly barcade showdowns, retro pinball high-score hunting, and arcade gaming nights." },
+    { name: "Video Games & LAN Parties", category: "Gaming", icon: "🎮", colorIdx: 1, desc: "Multiplayer gaming get-togethers, online co-op sessions, and local LAN showdowns." },
+    { name: "Anime, Manga & K-Pop", category: "Entertainment", icon: "🌸", colorIdx: 2, desc: "Watch parties, manga swaps, cosplay meetups, and K-Pop listening sessions." },
+    { name: "Movie Buffs & Cinema", category: "Entertainment", icon: "🍿", colorIdx: 4, desc: "Local theater outings, indie film screenings, and living room movie nights." },
+    { name: "Karaoke/Trivia", category: "Entertainment", icon: "🎤", colorIdx: 1, desc: "Weekly pub trivia, belting out throwback anthems, and local spot showdowns." },
+    { name: "Book Club", category: "Creative", icon: "📚", colorIdx: 4, desc: "Monthly book discussions, sci-fi, mystery, fiction reads, and coffee shop chats." },
+    { name: "All about Technology", category: "Tech", icon: "💻", colorIdx: 0, desc: "Coding, hardware building, python scripts, web dev, and tinkering with tech projects together." },
+    { name: "Grief Support Circle", category: "Support", icon: "🕊️", colorIdx: 3, desc: "A safe, supportive space for those grieving the loss of loved ones or pets." },
+    { name: "Sober Socials", category: "Social", icon: "🥤", colorIdx: 5, desc: "Alcohol-free hangouts, coffee runs, and mocktail nights for those in recovery or living sober." },
+    { name: "Frugal Living & Budgeting", category: "Support", icon: "💡", colorIdx: 5, desc: "Share local free events, meal prep tips, thrifting hauls, and budgeting strategies." }
+  ];
+
+  return templates.map((item, idx) => {
+    const theme = THEME_COLORS[item.colorIdx % THEME_COLORS.length];
+    return {
+      id: `${zip}-${idx + 1}`,
+      zipCode: zip,
+      name: item.name,
+      category: item.category,
+      location: `Zip Code ${zip} Area`,
+      members: 0,
+      description: item.desc,
+      events: [],
+      icon: item.icon,
+      color: theme.class,
+      glow: theme.glow,
+      chatMessages: []
+    };
+  });
+};
+
+const getRadiusZipList = (targetZip: string, radiusMiles: number): string[] => {
+  const cleanZip = targetZip.trim() || "43230";
+  const numZips = radiusMiles <= 1 ? 1 : Math.min(14, Math.ceil(radiusMiles / 3) + 1);
+  const result: string[] = [cleanZip];
+  if (numZips <= 1) return result;
+
+  const prefix = cleanZip.slice(0, 3);
+  const regionalPools: Record<string, string[]> = {
+    "432": ["43230", "43229", "43215", "43214", "43212", "43201", "43206", "43221", "43220", "43235", "43222", "43223", "43204", "43228"],
+    "430": ["43081", "43085", "43054", "43068", "43026", "43016", "43017", "43065", "43015", "43040", "43230", "43229"],
+    "431": ["43123", "43119", "43147", "43110", "43130", "43140", "43160", "43222", "43223", "43207"]
+  };
+
+  if (regionalPools[prefix]) {
+    const others = regionalPools[prefix].filter(z => z !== cleanZip);
+    result.push(...others.slice(0, numZips - 1));
+  } else {
+    const baseTail = parseInt(cleanZip.slice(3, 5), 10) || 10;
+    const offsets = [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7];
+    for (const off of offsets) {
+      if (result.length >= numZips) break;
+      const nextTail = ((baseTail + off + 99) % 98) + 1;
+      const candidate = `${prefix}${String(nextTail).padStart(2, "0")}`;
+      if (!result.includes(candidate)) {
+        result.push(candidate);
+      }
+    }
+  }
+  return result;
+};
+
+const PERSONALIZATION_COLORS = [
+  { name: "Electric Cyan", hex: "#06b6d4", bgClass: "bg-cyan-500", textClass: "text-cyan-400" },
+  { name: "Glow Gold", hex: "#f59e0b", bgClass: "bg-amber-500", textClass: "text-amber-400" },
+  { name: "Neon Magenta", hex: "#ec4899", bgClass: "bg-pink-500", textClass: "text-pink-400" },
+  { name: "Vibrant Emerald", hex: "#10b981", bgClass: "bg-emerald-500", textClass: "text-emerald-400" },
+  { name: "Pure White", hex: "#ffffff", bgClass: "bg-white", textClass: "text-white" },
+  { name: "Royal Violet", hex: "#a855f7", bgClass: "bg-purple-500", textClass: "text-purple-400" },
+  { name: "Sunset Orange", hex: "#f97316", bgClass: "bg-orange-500", textClass: "text-orange-400" },
+];
+
+function ProductCard({ 
+  product, 
+  onAddToCart, 
+  onOpenSub,
+  activeZipCode = "43230",
+  currentUserName = ""
+}: { 
+  product: ShopItem; 
+  onAddToCart: (product: ShopItem, size?: string, design?: string, customName?: string, customColor?: string, customColorName?: string) => void; 
+  onOpenSub: () => void;
+  activeZipCode?: string;
+  currentUserName?: string;
+}) {
+  const [selectedSize, setSelectedSize] = useState(product.sizes ? product.sizes[0] : undefined);
+  const [selectedDesign, setSelectedDesign] = useState(DESIGNS[0]);
+  const [customText, setCustomText] = useState("");
+  const [selectedColor, setSelectedColor] = useState(PERSONALIZATION_COLORS[0]);
+  const [imgIdx, setImgIdx] = useState(0);
+
+  const isPersonalized = selectedDesign.includes("Personalized");
+
+  useEffect(() => {
+    if (product.images && product.images.length > 1 && !product.video) {
+      const timer = setInterval(() => {
+        setImgIdx(prev => (prev + 1) % product.images.length);
+      }, 3000);
+      return () => clearInterval(timer);
+    }
+  }, [product.images, product.video]);
+
+  return (
+    <div className="bg-[#111827] border border-gray-800 rounded-3xl overflow-hidden shadow-xl flex flex-col justify-between hover:border-cyan-500/40 transition-all group">
+      <div>
+        <div className="w-full h-56 bg-black/60 relative overflow-hidden flex items-center justify-center p-4">
+          {product.video ? (
+            <video src={product.video} autoPlay loop muted playsInline className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" />
+          ) : product.images && product.images.length > 0 ? (
+            <img src={product.images[imgIdx]} alt={product.name} className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" />
+          ) : (
+            <span className="text-4xl">🎁</span>
+          )}
+          <span className="absolute top-3 right-3 text-[10px] font-bold uppercase tracking-wider bg-cyan-950/90 text-cyan-300 border border-cyan-800 px-2.5 py-1 rounded-full shadow-md">
+            {product.category}
+          </span>
+          {product.images && product.images.length > 1 && !product.video && (
+            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 z-10">
+              {product.images.map((_, i) => (
+                <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i === imgIdx ? 'bg-cyan-400' : 'bg-gray-600'}`}></span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="p-5 pb-2">
+          <h4 className="text-base font-bold text-white mb-1">{product.name}</h4>
+          <p className="text-xs text-gray-400 mb-4 leading-relaxed">{product.description}</p>
+          
+          <div className="flex flex-col gap-3 mb-2">
+            {!product.isHostMembership && (
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Select Design:</label>
+                <select 
+                  value={selectedDesign} 
+                  onChange={(e) => setSelectedDesign(e.target.value)} 
+                  className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500"
+                >
+                  {DESIGNS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+            )}
+
+            {!product.isHostMembership && isPersonalized && (
+              <div className="bg-gradient-to-br from-cyan-950/20 via-black to-gray-900 p-3.5 rounded-2xl border border-cyan-500/40 mt-1 flex flex-col gap-2.5 shadow-inner">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-cyan-300 flex items-center gap-1.5">
+                    <span>✨</span> Custom Print Details:
+                  </label>
+                  <span className="text-[9px] bg-cyan-950 text-cyan-300 border border-cyan-700 px-2 py-0.5 rounded-full font-bold">
+                    Personalized
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">
+                    Custom Name or Crew Phrase:
+                  </label>
+                  <input 
+                    type="text"
+                    maxLength={32}
+                    value={customText}
+                    onChange={(e) => setCustomText(e.target.value)}
+                    placeholder="e.g. Gahanna Crew, Heather & Friends..."
+                    className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs placeholder:text-gray-600 focus:outline-none focus:border-cyan-400"
+                  />
+                  <div className="flex gap-1.5 flex-wrap mt-1.5">
+                    <button 
+                      type="button" 
+                      onClick={() => setCustomText(`Zip ${activeZipCode} Crew`)}
+                      className="text-[9px] px-2 py-0.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer transition-colors"
+                    >
+                      + Zip {activeZipCode} Crew
+                    </button>
+                    {currentUserName && (
+                      <button 
+                        type="button" 
+                        onClick={() => setCustomText(`${currentUserName}'s Circle`)}
+                        className="text-[9px] px-2 py-0.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer transition-colors"
+                      >
+                        + {currentUserName}&apos;s Circle
+                      </button>
+                    )}
+                    <button 
+                      type="button" 
+                      onClick={() => setCustomText("Official Zip Host")}
+                      className="text-[9px] px-2 py-0.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer transition-colors"
+                    >
+                      + Official Host
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                    Select Text Color:
+                  </label>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {PERSONALIZATION_COLORS.map(c => (
+                      <button
+                        key={c.name}
+                        type="button"
+                        onClick={() => setSelectedColor(c)}
+                        title={c.name}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                          selectedColor.name === c.name 
+                            ? 'border-cyan-400 bg-cyan-950/80 text-white shadow-md ring-1 ring-cyan-400' 
+                            : 'border-gray-800 bg-gray-900/60 text-gray-400 hover:border-gray-700'
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${c.bgClass}`}></span>
+                        <span>{c.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {customText.trim() && (
+                  <div className="bg-black/80 px-3 py-2 rounded-xl border border-gray-800 flex items-center justify-between text-xs">
+                    <span className="text-[10px] text-gray-500 font-bold uppercase">Print Preview:</span>
+                    <span className="font-black tracking-wide" style={{ color: selectedColor.hex }}>
+                      &ldquo;{customText.trim()}&rdquo;
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {product.sizes && (
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Size:</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {product.sizes.map(sz => (
+                    <button 
+                      key={sz} 
+                      onClick={() => setSelectedSize(sz)} 
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-all cursor-pointer ${selectedSize === sz ? 'bg-cyan-600 border-cyan-400 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 flex items-center justify-between border-t border-gray-800/80 mt-2 bg-gray-900/30">
+        <span className="text-lg font-black text-amber-400">${product.price}.00</span>
+        <button 
+          onClick={() => {
+            if (product.isHostMembership) {
+              onOpenSub();
+            } else {
+              const appliedCustomName = isPersonalized ? (customText.trim() || `Zip ${activeZipCode} Local`) : undefined;
+              const appliedColor = isPersonalized ? selectedColor.hex : undefined;
+              const appliedColorName = isPersonalized ? selectedColor.name : undefined;
+              onAddToCart(product, selectedSize, selectedDesign, appliedCustomName, appliedColor, appliedColorName);
+            }
+          }} 
+          className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:opacity-90 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer transition-all"
+        >
+          {product.isHostMembership ? 'Start Free Trial 👑' : 'Add to Cart 🛒'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function generateZipBotResponse(
+  input: string, 
+  context: { 
+    userName: string; 
+    zipCode: string; 
+    isHost: boolean; 
+    eventsCount: number; 
+    groups: CommunityGroup[]; 
+    cloudEvents: GroupEvent[];
+  }
+): string {
+  const query = input.toLowerCase().trim();
+  const name = context.userName || "Neighbor";
+  const zip = context.zipCode || "43230";
+
+  if (/^(hi|hello|hey|yo|sup|what's up|howdy|good morning|good afternoon|good evening|greetings)\b/i.test(query)) {
+    return `Yo ${name}! Zip Bot in the house! 😎 What's crackin'? I'm ready to help you explore local circles in Zip ${zip}, walk you through our safety timer, give you host tips, or show you the official gear. What are you looking to do today?`;
+  }
+  if (/(who are you|what are you|what can you do|about you|cool|laid back|chill|funny|awesome bot|tell me about yourself|are you ai)/i.test(query)) {
+    return `Haha, appreciate the love! 🤙 I'm Zip Bot 🤖 — your chill, laid-back neighborhood co-pilot! I know all 30 circles for any zip code, how the 30-day Host trial works ($15/mo autopay, zero tax, free kit after 3 mos), our 🛡️ Safety check-in timer & 🚨 911 assist, and how to personalize your Zip Shop gear with custom names and neon glow colors. Ask me anything, neighbor!`;
+  }
+  if (/(paypal|merchant|h6lcrccpzutbu|payment method|pay with card)/i.test(query)) {
+    return `All checkouts and subscriptions are processed with full encryption through PayPal (Merchant ID: H6LCRCCPZUTBU / contactzipgroups@gmail.com). You can pay via PayPal balance or any major credit/debit card with complete security.`;
+  }
+  if (/(loophole|membership number|order number|order id|host id|verification id|receipt on my end)/i.test(query)) {
+    return `We fixed all loopholes! 🔒 Every host is issued an official Membership ID (ZIP-HOST-XXXXX) backed by active PayPal subscription verification. Shop buyers get an official Order ID (ZIP-ORD-XXXXX) with their complete shipping address and personalized items captured on the seller receipt. That keeps Zip Groups safe, verified, and transparent!`;
+  }
+  if (/(tax|taxes|sales tax|shipping fee|shipping cost|free shipping|delivery cost|5\.75)/i.test(query)) {
+    return `Here's our simple, honest checkout policy:\n• Ohio Sales Tax: 5.75% applies strictly to physical merchandise in the Zip Shop.\n• Host Memberships: $0.00 tax (100% exempt digital subscription).\n• Shipping: Flat $5.00 across the US, or totally FREE SHIPPING if your cart hits $50 or more!\n• Merchant: Processed directly through PayPal Merchant ID H6LCRCCPZUTBU (contactzipgroups@gmail.com).`;
+  }
+  if (/(host|hosting|free trial|become a host|host membership|15|autopay|subscription|crown|broadcast)/i.test(query)) {
+    return `Becoming a Verified Zip Host is where the community comes alive! 👑\n• 7-Day Free Trial: $0.00 today! You can test-drive broadcasting gatherings without paying upfront.\n• Autopay: After 30 days, it's just $15.00/month flat on autopay through PayPal (Merchant ID: H6LCRCCPZUTBU).\n• $0.00 Sales Tax: Subscriptions are a digital community membership, so there's ZERO sales tax!\n• Free Shipped Host Kit ($50 Value): Host for 3 active months and Heather ships you an official Welcome Kit (tote bag, acrylic table sign, yard sign, and lanyards)!\n• Unlimited Radius: Broadcast gatherings across all surrounding zip codes with your crown badge.\n• Verified Status: Every host gets a unique ID like ZIP-HOST-XXXXX to ensure all events are host-verified!`;
+  }
+  if (/\b(shop|store|merch|merchandise|t-shirt|shirt|mug|hat|bandana|playing cards|buy|personalize|custom|color)\b/i.test(query)) {
+    return `The Zip Shop is packed with official neighborhood gear! 🛍️\n• Featured Items: Custom tees, ceramic mugs, trucker hats, pet bandanas, waterproof yard signs, and host starter packs.\n• ✨ Personalization: Choose 'Zip Groups (Personalized)' or 'Zip Host (Personalized)' on any product to enter your custom crew or town name (like 'Gahanna Crew' or 'Heather & Friends')!\n• 🎨 Text Print Colors: Pick your favorite glow style: Electric Cyan (#06b6d4), Glow Gold (#f59e0b), Neon Magenta (#ec4899), Vibrant Emerald (#10b981), Pure White (#ffffff), Royal Violet (#a855f7), or Sunset Orange (#f97316)!`;
+  }
+  if (/(safety|timer|safe|emergency|911|contact|grace)/i.test(query)) {
+    return `Safety is our #1 foundation at Zip Groups! 🛡️ Here's how we keep everyone safe:\n1) 🛡️ Safety Check-In Timer: Tap 'Safety' in the top bar before leaving for a meetup. Pick how long you'll be there (1 to 4 hours). When your timer ends, you have a 10-minute buzzer grace period to tap 'I'm Safe'. If you don't check in, our system auto-dispatches an SMS & email alert with your live GPS location to your emergency contact!\n2) 🚨 911 Emergency Assist: One tap grabs your live GPS coordinates, copies your exact address for 911 operators, and alerts your emergency contact.\n3) 👥 Golden Rule: We always recommend 4+ neighbors for first-time meetups in well-lit public venues like parks or cafes!`;
+  }
+  if (/(venue|venues|partner|coffee shop|bar|cafe|restaurant|business|35)/i.test(query)) {
+    return `Partner Venues are local neighborhood businesses that team up with Zip Groups for $35/month! ☕🍺 It helps them fill empty tables on slow weeknights, while giving our groups guaranteed meeting spots and cool perks (like 15% off group drinks or free game tokens). Tap the 'Partner Venues' tab to see participating local spots or register your business!`;
+  }
+  if (/(check in|checkin|streak|points|flame)/i.test(query)) {
+    return `When you show up to a gathering, open the event card and tap 'Check In'! 🔥 It records your attendance, builds your neighborhood streak, and helps other neighbors see which events are active and legit. High streaks earn you bragging rights on the leaderboard!`;
+  }
+  if (/(heather|founder|who made|owner|creator|story)/i.test(query)) {
+    return `Heather is the awesome community founder of Zip Groups! 🌟 She created this platform to bring real neighbors back together face-to-face in a fun, safe, and spam-free space. She personally reviews community feedback and even ships out the Host Welcome Kits!`;
+  }
+  if (/(events|gatherings|happening|what's going on|meetup|active)/i.test(query)) {
+    if (context.cloudEvents && context.cloudEvents.length > 0) {
+      const top3 = context.cloudEvents.slice(0, 3).map(e => `• ${e.title} (${e.groupName}) at ${e.locationName}`).join('\n');
+      return `We've got ${context.cloudEvents.length} local gatherings happening around Zip ${zip}! Here are a few:\n${top3}\nTap any group circle or the 'All Events' filter to see the rest and RSVP!`;
+    }
+    return `There are 30 circles ready for gatherings in Zip ${zip}! Check out Card Games, Pickleball, or Coffee Walkers, or tap '+ Host Gathering' to kick off the first meetup down your street!`;
+  }
+  if (/(radius|slider|distance|miles|search zip|search)/i.test(query)) {
+    return `Just use the Neighborhood Radius Slider right next to the zip search bar! Slide it anywhere from 1 to 50 miles. If you're walking, set it to 1-3 miles. If you want to see all county meetups, crank it to 25 or 50 miles!`;
+  }
+  return `I'm with ya! 😎 As your neighborhood co-pilot, I can help you with anything on Zip Groups:\n• 📍 Finding local circles in Zip ${zip} (1-50 mile radius)\n• 👑 30-Day Free Host Trial ($15/mo autopay, $0 tax, free Welcome Kit)\n• 🛍️ Zip Shop gear & personalized print colors\n• 🛡️ Safety check-in timer & 🚨 911 assist\n• 🏆 Partner Venues ($35/mo)\nJust ask me whatever you need, ${name}!`;
+}
+
+export default function Home() {
+  const [groups, setGroups] = useState<CommunityGroup[]>(() => [HOST_HQ_GROUP, ...generateGroupsForZip("43230")]);
+  const [allCloudUsers, setAllCloudUsers] = useState<Record<string, any>[]>([]);
+  const [cloudEvents, setCloudEvents] = useState<GroupEvent[]>([]);
+
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isHostOpen, setIsHostOpen] = useState(false);
+  const [isSuggestOpen, setIsSuggestOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isLegendOpen, setIsLegendOpen] = useState(false);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isPartnerModalOpen, setIsPartnerModalOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
+  const [isManageSubOpen, setIsManageSubOpen] = useState(false);
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const [isReportChatOpen, setIsReportChatOpen] = useState(false);
+  const [isMessagesView, setIsMessagesView] = useState(false);
+  const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
+  const [isDiscordModalOpen, setIsDiscordModalOpen] = useState(false);
+  const [isHeatmapView, setIsHeatmapView] = useState(false);
+  const [isSavedView, setIsSavedView] = useState(false);
+  const [isShopView, setIsShopView] = useState(false);
+  const [isFriendsView, setIsFriendsView] = useState(false);
+  const [isGalleryView, setIsGalleryView] = useState(false);
+  const [isVenuesView, setIsVenuesView] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<CommunityGroup | null>(null);
+  const [activeGroupMembers, setActiveGroupMembers] = useState<any[]>([]);
+  const [activeLegalModal, setActiveLegalModal] = useState<null | "terms" | "privacy" | "guidelines" | "disclaimer">(null);
+
+  const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
+  const [verificationCodeSent, setVerificationCodeSent] = useState("");
+  const [verificationCodeInput, setVerificationCodeInput] = useState("");
+  const [isSendingCode, setIsSendingCode] = useState(false);
+
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetUsernameInput, setResetUsernameInput] = useState("");
+  const [resetEmailInput, setResetEmailInput] = useState("");
+  const [resetCodeSent, setResetCodeSent] = useState("");
+  const [resetCodeInput, setResetCodeInput] = useState("");
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetStep, setResetStep] = useState<"request" | "verify">("request");
+  const [showResetPassword, setShowResetPassword] = useState(false);
+
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [shopCategoryFilter, setShopCategoryFilter] = useState("All");
+
+  const [joinedGroups, setJoinedGroups] = useState<Set<string>>(new Set());
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [rsvps, setRsvps] = useState<Record<string, boolean>>({});
+  const [savedZips, setSavedZips] = useState<string[]>([]);
+  
+  const [discordInviteUrl, setDiscordInviteUrl] = useState("");
+  const [discordLinked, setDiscordLinked] = useState(false);
+  const [showDiscordOnCard, setShowDiscordOnCard] = useState(true);
+
+  const [safetyActive, setSafetyActive] = useState(false);
+  const [safetyStep, setSafetyStep] = useState<"time" | "atEvent" | "interval" | "active">("time");
+  const [safetyEventTime, setSafetyEventTime] = useState("18:00");
+  const [safetyIntervalHours, setSafetyIntervalHours] = useState(2);
+  const [safetyPromptDue, setSafetyPromptDue] = useState(false);
+  const [safetyGraceSeconds, setSafetyGraceSeconds] = useState(600);
+
+  const [reportNames, setReportNames] = useState("");
+  const [reportSeverity, setReportSeverity] = useState("Medium");
+  const [reportDetails, setReportDetails] = useState("");
+
+  const [friendSearchInput, setFriendSearchInput] = useState("");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [selectedChatStyle, setSelectedChatStyle] = useState(CHAT_FONT_STYLES[0].class);
+  const [hasAcceptedChatTerms, setHasAcceptedChatTerms] = useState(false);
+  const [activePM, setActivePM] = useState<ZipFriend | null>(ZIP_BOT_FRIEND);
+  const [pmInput, setPmInput] = useState("");
+  const [friendsList, setFriendsList] = useState<ZipFriend[]>([ZIP_BOT_FRIEND]);
+  const [friendRequests, setFriendRequests] = useState<string[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
+  const [unreadCount, setUnreadCount] = useState(0); 
+  const [friendRequestsCount, setFriendRequestsCount] = useState(0);
+  const [gifSearchQuery, setGifSearchQuery] = useState("");
+  const [gifSearchResults, setGifSearchResults] = useState<any[]>([]);
+  const [isSearchingGifs, setIsSearchingGifs] = useState(false);
+
+  const [zipBotMessages, setZipBotMessages] = useState<{ id: number; sender: string; text: string; time: string }[]>([
+    { id: 1, sender: "Zip Bot", text: "Hey! I'm Zipbot. I'm happy to help you get started with Zip Groups. Let me know if you need anything!", time: "12:00" }
+  ]);
+  const [pmMessages, setPmMessages] = useState<{ id: number; sender: string; text: string; time: string }[]>([]);
+
+  const [notification, setNotification] = useState<string | null>(null);
+
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userName, setUserName] = useState("");
+  const [firstNameInput, setFirstNameInput] = useState("");
+  const [lastNameInput, setLastNameInput] = useState("");
+  const [userNameInput, setUserNameInput] = useState("");
+  const [dobInput, setDobInput] = useState("");
+  const [ageCategory, setAgeCategory] = useState("Adult 18+");
+  const [emailSignupInput, setEmailSignupInput] = useState("");
+  const [phoneInput, setPhoneInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
+
+  const [userEmail, setUserEmail] = useState("");
+  const [userPhone, setUserPhone] = useState("");
+  const [showEmailPublic, setShowEmailPublic] = useState(false);
+  const [showPhonePublic, setShowPhonePublic] = useState(false);
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
+
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [storedPassword, setStoredPassword] = useState("");
+  const [isLoginMode, setIsLoginMode] = useState(false);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [userStatus, setUserStatus] = useState<"Online" | "Busy" | "Show Offline" | "At an event">("Online");
+  const [userAge, setUserAge] = useState<string>("");
+  const [userGender, setUserGender] = useState<string>("");
+  const [showAgePublic, setShowAgePublic] = useState(true);
+  const [showGenderPublic, setShowGenderPublic] = useState(true);
+  const [emergencyContactName, setEmergencyContactName] = useState("");
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState("");
+  const [emergencyContactCarrier, setEmergencyContactCarrier] = useState("verizon");
+  const [emergencyContactEmail, setEmergencyContactEmail] = useState("");
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(null);
+  const [userCardBannerUrl, setUserCardBannerUrl] = useState<string | null>(null);
+  const [userCardThemeGradient, setUserCardThemeGradient] = useState<string>("from-purple-950 via-indigo-950 to-black");
+  const [userHostedEvents, setUserHostedEvents] = useState(0); 
+  const [userStreak, setUserStreak] = useState(0);
+  const [userStellarRating, setUserStellarRating] = useState(0);
+  const [userStellarReviews, setUserStellarReviews] = useState(0);
+  const [isSubscribedHost, setIsSubscribedHost] = useState(false);
+  const [hostMembershipId, setHostMembershipId] = useState<string>("");
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+
+  const [subTermsAgreed, setSubTermsAgreed] = useState(false);
+  const [shippingAddress, setShippingAddress] = useState({ street: "", city: "", state: "", zip: "" });
+
+  const [shopShipping, setShopShipping] = useState({ fullName: "", street: "", apt: "", city: "", state: "", zip: "", phone: "" });
+  const [lastCompletedOrder, setLastCompletedOrder] = useState<{
+    orderId: string;
+    items: CartItem[];
+    subtotal: number;
+    tax: number;
+    shipping: number;
+    grandTotal: number;
+    shippingAddress: { fullName: string; street: string; apt?: string; city: string; state: string; zip: string; phone?: string };
+    date: string;
+  } | null>(null);
+  const [lastCompletedHostSub, setLastCompletedHostSub] = useState<{
+    membershipId: string;
+    plan: string;
+    rate: string;
+    trialDays: number;
+    shippingAddress: { street: string; city: string; state: string; zip: string };
+    date: string;
+  } | null>(null);
+
+  const [partnerBusinessName, setPartnerBusinessName] = useState("");
+  const [partnerAddress, setPartnerAddress] = useState("");
+  const [partnerPhone, setPartnerPhone] = useState("");
+  const [partnerEmail, setPartnerEmail] = useState("");
+  const [partnerHours, setPartnerHours] = useState("");
+  const [partnerPerk, setPartnerPerk] = useState("");
+  const [partnerMenu, setPartnerMenu] = useState("");
+
+  const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewText, setReviewText] = useState("");
+
+  const [photos, setPhotos] = useState<GalleryPhoto[]>(INITIAL_PHOTOS);
+  const [uploadGroup, setUploadGroup] = useState("");
+  const [uploadCaption, setUploadCaption] = useState("");
+  const [previewUploadUrl, setPreviewUploadUrl] = useState<string | null>(null);
+
+  const [zipCode, setZipCode] = useState("");
+  const [radius, setRadius] = useState(5);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [hostCenterZip, setHostCenterZip] = useState<string>("43230");
+  const [hostRadiusMiles, setHostRadiusMiles] = useState<number>(5);
+  const [hostZipCodes, setHostZipCodes] = useState<string>("43230");
+
+  const [isEditEventModalOpen, setIsEditEventModalOpen] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [editEventZip, setEditEventZip] = useState("43230");
+  const [editEventRadiusMiles, setEditEventRadiusMiles] = useState<number>(5);
+  const [editEventTitle, setEditEventTitle] = useState("");
+  const [editEventDesc, setEditEventDesc] = useState("");
+  const [editEventDate, setEditEventDate] = useState("");
+  const [editEventTime, setEditEventTime] = useState("");
+  const [editEventLocation, setEditEventLocation] = useState("");
+  const [editEventIsAdultOnly, setEditEventIsAdultOnly] = useState(false);
+  const [editEventColorIndex, setEditEventColorIndex] = useState(0);
+
+  const [userCheckIns, setUserCheckIns] = useState<Record<string, number>>({});
+  
+  const [signupAgreedTerms, setSignupAgreedTerms] = useState(false);
+  const [selectedCategoryGroup, setSelectedCategoryGroup] = useState("Men's Circle");
+  const [duplicateToAllZips, setDuplicateToAllZips] = useState(true);
+  const [eventTitle, setEventTitle] = useState("");
+  const [eventDesc, setEventDesc] = useState("");
+  const [eventLocation, setEventLocation] = useState("");
+  const [eventDate, setEventDate] = useState("");
+  const [eventTime, setEventTime] = useState("");
+  const [selectedColorIndex, setSelectedColorIndex] = useState(0);
+  const [hostChecklist, setHostChecklist] = useState<string[]>([]);
+  const [suggestName, setSuggestName] = useState("");
+  const [suggestDesc, setSuggestDesc] = useState("");
+  const [isAdultOnly, setIsAdultOnly] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
+
+  const userInitials = useMemo(() => {
+    if (!userName) return "US";
+    const parts = userName.trim().split(" ");
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return userName.slice(0, 2).toUpperCase();
+  }, [userName]);
+
+  const groupMemberCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allCloudUsers.forEach(u => {
+      if (Array.isArray(u.joinedGroups)) {
+        u.joinedGroups.forEach((gId: string) => {
+          counts[gId] = (counts[gId] || 0) + 1;
+        });
+      }
+    });
+    return counts;
+  }, [allCloudUsers]);
+
+  const topCommunityHosts = useMemo(() => {
+    const hosts = [...allCloudUsers]
+      .filter(u => (u.hostedCount || 0) > 0)
+      .sort((a, b) => (b.hostedCount || 0) - (a.hostedCount || 0))
+      .slice(0, 3);
+    return hosts;
+  }, [allCloudUsers]);
+
+  const filteredGroups = useMemo(() => {
+    if (!hasSearched) return [];
+    const targetZip = (zipCode.trim() || "43230");
+
+    const numZipsToShow = radius <= 5 ? 1 : Math.min(10, Math.floor(radius / 3) + 1);
+    let radiusZips: string[] = [targetZip];
+
+    if (numZipsToShow > 1) {
+      const prefix = targetZip.slice(0, 3);
+      const regionalPools: Record<string, string[]> = {
+        "432": ["43222", "43223", "43215", "43204", "43212", "43201", "43206", "43214", "43221", "43229", "43230", "43228", "43220", "43235"],
+        "430": ["43081", "43085", "43026", "43016", "43017", "43068", "43054", "43065", "43015", "43040", "43230", "43229"],
+        "431": ["43123", "43119", "43147", "43110", "43130", "43140", "43160", "43222", "43223", "43207"]
+      };
+
+      if (regionalPools[prefix]) {
+        const others = regionalPools[prefix].filter(z => z !== targetZip);
+        radiusZips = [targetZip, ...others.slice(0, numZipsToShow - 1)];
+      } else {
+        const baseTail = parseInt(targetZip.slice(3, 5), 10) || 10;
+        const offsets = [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6];
+        for (const off of offsets) {
+          if (radiusZips.length >= numZipsToShow) break;
+          const nextTail = ((baseTail + off + 99) % 98) + 1;
+          const candidateZip = `${prefix}${String(nextTail).padStart(2, "0")}`;
+          if (!radiusZips.includes(candidateZip)) {
+            radiusZips.push(candidateZip);
+          }
+        }
+      }
+    }
+
+    const allRadiusGroups: CommunityGroup[] = [];
+    radiusZips.forEach(z => {
+      const existing = groups.filter(g => g.zipCode === z && !g.isHostOnly);
+      const baseList = existing.length > 0 ? existing : generateGroupsForZip(z);
+      baseList.forEach(g => {
+        const matchingCloudEvents = cloudEvents.filter(
+          ev => ev.groupId === g.id || (ev.zipCode === g.zipCode && ev.groupName?.toLowerCase() === g.name.toLowerCase())
+        );
+        allRadiusGroups.push({
+          ...g,
+          members: groupMemberCounts[g.id] || 0,
+          events: matchingCloudEvents
+        });
+      });
+    });
+
+    return allRadiusGroups;
+  }, [hasSearched, zipCode, radius, groups, groupMemberCounts, cloudEvents]);
+
+  const stackedGroups = useMemo(() => {
+    if (!hasSearched) return [];
+    const grouped = new Map<string, CommunityGroup[]>();
+    filteredGroups.forEach(g => {
+      if (!grouped.has(g.name)) grouped.set(g.name, []);
+      grouped.get(g.name)!.push(g);
+    });
+    return Array.from(grouped.values());
+  }, [hasSearched, filteredGroups]);
+
+  const uniqueGroupNames = Array.from(new Set(groups.filter(g => !g.isHostOnly).map(g => g.name)));
+  const totalGroupsCount = 30;
+  const totalMembersCount = allCloudUsers.length;
+  
+  const topReviews = useMemo(() => {
+    return reviews.filter(r => r.rating >= 4).slice(0, 3);
+  }, [reviews]);
+
+  const isJoined = selectedGroup ? joinedGroups.has(selectedGroup.id) : false;
+  const isFavorited = selectedGroup ? favorites.has(selectedGroup.id) : false;
+
+  const activeGroupEvents = useMemo(() => {
+    if (!selectedGroup) return [];
+    const fromCloud = cloudEvents.filter(
+      ev => ev.groupId === selectedGroup.id || (ev.zipCode === selectedGroup.zipCode && ev.groupName?.toLowerCase() === selectedGroup.name.toLowerCase())
+    );
+    return getValidEvents(fromCloud);
+  }, [selectedGroup, cloudEvents]);
+
+const wipeLocalStateAndLogout = () => {
+    localStorage.removeItem("zipgroups_user_settings_v1");
+    localStorage.removeItem("zip_user_name");
+    localStorage.removeItem("zip_is_logged_in");
+    setIsLoggedIn(false);
+    setUserName("");
+    setUserEmail("");
+    setUserPhone("");
+    setUserAvatarUrl(null);
+    setUserCardBannerUrl(null);
+    setDiscordInviteUrl("");
+    setDiscordLinked(false);
+    setEmergencyContactName("");
+    setEmergencyContactPhone("");
+    setEmergencyContactEmail("");
+    setJoinedGroups(new Set());
+    setFavorites(new Set());
+    setSavedZips([]);
+    setIsSubscribedHost(false);
+    setHostMembershipId("");
+    setIsProfileOpen(false);
+    setIsAccountSettingsOpen(false);
+    window.location.href = "/";
+  };
+
+  const handleReset = () => {
+    setHasSearched(false);
+    setSelectedGroup(null);
+    setIsSavedView(false);
+    setIsShopView(false);
+    setIsFriendsView(false);
+    setIsGalleryView(false);
+    setIsVenuesView(false);
+    setIsMessagesView(false);
+    setIsHeatmapView(false);
+    setZipCode("");
+    setIsProfileOpen(false);
+  };
+
+  const isSubViewOpen = Boolean(
+    selectedGroup ||
+    hasSearched ||
+    isSavedView ||
+    isShopView ||
+    isFriendsView ||
+    isGalleryView ||
+    isVenuesView ||
+    isMessagesView ||
+    isHeatmapView ||
+    isHostOpen ||
+    isSearchOpen ||
+    isAccountSettingsOpen ||
+    isManageSubOpen
+  );
+
+  useEffect(() => {
+    if (isSubViewOpen) {
+      window.history.pushState({ zipSubView: true }, "");
+    }
+  }, [
+    selectedGroup?.id,
+    hasSearched,
+    isSavedView,
+    isShopView,
+    isFriendsView,
+    isGalleryView,
+    isVenuesView,
+    isMessagesView,
+    isHeatmapView,
+    isHostOpen,
+    isSearchOpen,
+    isAccountSettingsOpen,
+    isManageSubOpen
+  ]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (isEditEventModalOpen) { setIsEditEventModalOpen(false); return; }
+      if (isHostOpen) { setIsHostOpen(false); return; }
+      if (isSearchOpen) { setIsSearchOpen(false); return; }
+      if (isAccountSettingsOpen) { setIsAccountSettingsOpen(false); return; }
+      if (isManageSubOpen) { setIsManageSubOpen(false); return; }
+      if (isUploadOpen) { setIsUploadOpen(false); return; }
+      if (isCartOpen) { setIsCartOpen(false); return; }
+
+      if (selectedGroup) {
+        setSelectedGroup(null);
+        return;
+      }
+
+      setHasSearched(false);
+      setIsSavedView(false);
+      setIsShopView(false);
+      setIsFriendsView(false);
+      setIsGalleryView(false);
+      setIsVenuesView(false);
+      setIsMessagesView(false);
+      setIsHeatmapView(false);
+      setIsProfileOpen(false);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [
+    selectedGroup,
+    isEditEventModalOpen,
+    isHostOpen,
+    isSearchOpen,
+    isAccountSettingsOpen,
+    isManageSubOpen,
+    isUploadOpen,
+    isCartOpen
+  ]);
+
+  function calculateAgeCategory(birthdayStr: string): string {
+    if (!birthdayStr || !birthdayStr.trim()) return "Adult 18+";
+    const cleanStr = birthdayStr.trim();
+    const birthDate = new Date(cleanStr);
+    if (isNaN(birthDate.getTime())) {
+      const yearMatch = cleanStr.match(/\b(19\d\d|20\d\d)\b/);
+      if (yearMatch) {
+        const birthYear = parseInt(yearMatch[1], 10);
+        const approxAge = new Date().getFullYear() - birthYear;
+        return approxAge >= 18 ? "Adult 18+" : "Teen 13+";
+      }
+      return "Adult 18+";
+    }
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age >= 18 ? "Adult 18+" : "Teen 13+";
+  }
+
+  const requireAuth = (action: () => void) => {
+    if (!isLoggedIn) {
+      setPendingAction(() => action);
+      setIsAuthOpen(true);
+      return;
+    }
+    action();
+  };
+
+  const isHostUser = isSubscribedHost || Boolean(hostMembershipId) || userName.toLowerCase() === "heather";
+
+  const requireHostSubscription = (action: () => void) => {
+    requireAuth(() => {
+      if (!isHostUser) {
+        setPendingAction(() => action);
+        setIsManageSubOpen(true);
+        return;
+      }
+      action();
+    });
+  };
+
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
+
+  useEffect(() => {
+    localStorage.removeItem("zipgroups_user_settings_v1");
+  }, []);
+
+  useEffect(() => {
+    const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
+      const list: Record<string, any>[] = [];
+      snap.forEach((d: any) => list.push({ id: d.id, ...d.data() }));
+      setAllCloudUsers(list);
+    });
+    return () => unsubUsers();
+  }, []);
+
+  useEffect(() => {
+    const unsubEvents = onSnapshot(collection(db, "group_events"), (snap) => {
+      const evts: GroupEvent[] = [];
+      snap.forEach((d: any) => evts.push({ ...(d.data() as GroupEvent), id: d.id }));
+      setCloudEvents(evts);
+    });
+    return () => unsubEvents();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "reviews"), orderBy("timestamp", "desc"));
+    const unsubReviews = onSnapshot(q, (snap) => {
+      const revs: Review[] = [];
+      snap.forEach((d: any) => revs.push({ ...(d.data() as Review), id: d.id }));
+      setReviews(revs);
+    });
+    return () => unsubReviews();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "gallery_photos"), orderBy("timestamp", "desc"));
+    const unsubPhotos = onSnapshot(q, (snap) => {
+      const list: GalleryPhoto[] = [];
+      snap.forEach((d: any) => list.push({ ...(d.data() as GalleryPhoto), id: d.id }));
+      setPhotos(list);
+    });
+    return () => unsubPhotos();
+  }, []);
+
+  useEffect(() => {
+    const savedName = localStorage.getItem("zip_user_name");
+    if (!savedName) return;
+
+    setUserName(savedName);
+    setIsLoggedIn(true);
+
+    const userDocRef = doc(db, "users", savedName.toLowerCase());
+    const unsubscribeUser = onSnapshot(userDocRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setUserName(data.name || data.userName || savedName);
+        setUserHostedEvents(data.hostedCount || 0);
+        setUserStreak(data.streak || 0);
+        setUserStellarRating(data.stellarRating || 0);
+        setUserStellarReviews(data.stellarReviews || 0);
+        setUserStatus(data.status || "Online");
+        setUserAvatarUrl(data.avatarUrl || null);
+        setUserCardBannerUrl(data.cardBannerUrl || null);
+        setUserCardThemeGradient(data.cardThemeGradient || "from-purple-950 via-indigo-950 to-black");
+        setDiscordInviteUrl(data.discordInviteUrl || "");
+        setDiscordLinked(Boolean(data.discordInviteUrl));
+        setShowDiscordOnCard(data.showDiscordOnCard !== undefined ? data.showDiscordOnCard : true);
+        setEmergencyContactName(data.emergencyContactName || "");
+        setEmergencyContactEmail(data.emergencyContactEmail || "");
+        setEmergencyContactPhone(data.emergencyContactPhone || "");
+        setEmergencyContactCarrier(data.emergencyContactCarrier || "verizon");
+        setIsSubscribedHost(Boolean(data.isSubscribed));
+        if (data.hostMembershipId) setHostMembershipId(data.hostMembershipId);
+        setJoinedGroups(new Set(Array.isArray(data.joinedGroups) ? data.joinedGroups : []));
+        setFavorites(new Set(Array.isArray(data.favorites) ? data.favorites : []));
+        setFriendRequests(Array.isArray(data.friendRequests) ? data.friendRequests : []);
+        setSavedZips(Array.isArray(data.savedZips) ? data.savedZips : []);
+        setUserEmail(data.email || "");
+        setEmailSignupInput(data.email || "");
+        setUserPhone(data.phone || "");
+        setPhoneInput(data.phone || "");
+        setUserAge(data.age || "");
+        setUserGender(data.gender || "");
+        setShowEmailPublic(Boolean(data.showEmailPublic));
+        setShowPhonePublic(Boolean(data.showPhonePublic));
+        setIsEmailVerified(Boolean(data.isEmailVerified));
+        setUnreadCount(data.unreadCount || 0);
+        if (data.password) setStoredPassword(data.password);
+        if (data.shippingAddress) setShippingAddress(data.shippingAddress);
+        if (data.dob) {
+          setAgeCategory(calculateAgeCategory(data.dob));
+        } else if (data.ageCategory) {
+          setAgeCategory(data.ageCategory);
+        }
+
+        setFriendRequestsCount((data.friendRequests || []).length);
+
+        const rawFriends: string[] = data.friends || ["Zip Bot", "Heather"];
+        const ensuredFriends = Array.from(new Set(["Zip Bot", "Heather", ...rawFriends]));
+        const resolvedFriends: ZipFriend[] = [ZIP_BOT_FRIEND];
+
+        for (const fName of ensuredFriends) {
+          if (fName.toLowerCase() === "zip bot") continue;
+          if (fName.toLowerCase() === savedName.toLowerCase()) continue;
+
+          try {
+            const friendDocRef = doc(db, "users", fName.toLowerCase());
+            const friendSnap = await getDoc(friendDocRef);
+            if (friendSnap.exists()) {
+              const fData = friendSnap.data();
+              resolvedFriends.push({
+                id: `f-${fName.toLowerCase()}`,
+                name: fData.name || fName,
+                handle: `@${fName.toLowerCase()}`,
+                status: fData.status || "Online",
+                mutualGroups: 1,
+                avatarColor: "bg-blue-600",
+                avatarInitials: (fData.name || fName).slice(0, 2).toUpperCase(),
+                avatarUrl: fData.avatarUrl || undefined,
+                cardBannerUrl: fData.cardBannerUrl || undefined,
+                cardThemeGradient: fData.cardThemeGradient || "from-purple-950 via-indigo-950 to-black",
+                hostedCount: fData.hostedCount || 0,
+                streak: fData.streak || 0,
+                stellarRating: fData.stellarRating || 0,
+                stellarReviews: fData.stellarReviews || 0,
+                ageCategory: fData.dob ? calculateAgeCategory(fData.dob) : (fData.ageCategory || "Adult 18+"),
+                email: fData.email,
+                phone: fData.phone,
+                showEmailPublic: fData.showEmailPublic,
+                showPhonePublic: fData.showPhonePublic,
+                discordInviteUrl: fData.discordInviteUrl || "",
+                discordLinked: Boolean(fData.discordInviteUrl),
+                showDiscordOnCard: fData.showDiscordOnCard !== undefined ? fData.showDiscordOnCard : true,
+                isDefault: fName.toLowerCase() === "heather"
+              });
+            }
+          } catch (err) {
+            console.error("Error resolving friend card data:", err);
+          }
+        }
+
+        setFriendsList(resolvedFriends);
+      }
+    });
+
+    return () => unsubscribeUser();
+  }, [userName]);
+
+  useEffect(() => {
+    if (!selectedGroup) return; 
+
+    const messagesRef = selectedGroup.isHostOnly
+      ? collection(db, "host_hq_messages")
+      : collection(db, "groups", selectedGroup.id, "messages");
+
+    const q = query(messagesRef, orderBy("timestamp", "asc"));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const liveMessages: ChatMessage[] = [];
+      snapshot.forEach((docSnap: any) => {
+        liveMessages.push(docSnap.data() as ChatMessage);
+      });
+      setSelectedGroup(prev => prev ? { ...prev, chatMessages: liveMessages } : prev);
+      setGroups(prevGroups => prevGroups.map(g => g.id === selectedGroup?.id ? { ...g, chatMessages: liveMessages } : g));
+    });
+
+    return () => unsubscribe();
+  }, [selectedGroup?.id]);
+
+  useEffect(() => {
+    if (!activePM || activePM.isBot || !userName) return;
+
+    const chatRoomId = [userName.toLowerCase(), activePM.name.toLowerCase()].sort().join("_");
+    const q = query(collection(db, "chats", chatRoomId, "messages"), orderBy("timestamp", "asc"));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs: { id: number; sender: string; text: string; time: string }[] = [];
+      snapshot.forEach((docSnap: any) => {
+        msgs.push(docSnap.data() as any);
+      });
+      setPmMessages(msgs);
+    });
+
+    return () => unsubscribe();
+  }, [activePM, userName]);
+
+  useEffect(() => {
+    if (!selectedGroup) return;
+
+    const membersQuery = selectedGroup.isHostOnly
+      ? query(collection(db, "users"), where("isSubscribed", "==", true))
+      : query(collection(db, "users"), where("joinedGroups", "array-contains", selectedGroup.id));
+
+    const unsubscribe = onSnapshot(membersQuery, (snapshot) => {
+      const liveMembers = snapshot.docs.map((docSnap: any) => ({
+        id: docSnap.id, 
+        ...docSnap.data()
+      }));
+      setActiveGroupMembers(liveMembers);
+    });
+
+    return () => unsubscribe(); 
+  }, [selectedGroup?.id, selectedGroup?.isHostOnly]);
+
+  useEffect(() => {
+    if (!safetyActive) {
+      setSafetyPromptDue(false);
+      setSafetyGraceSeconds(600);
+      return;
+    }
+
+    const intervalMs = safetyIntervalHours * 60 * 60 * 1000;
+    const checkInTimer = setTimeout(() => {
+      setSafetyPromptDue(true);
+      setSafetyGraceSeconds(600);
+      setNotification("🛡️ SAFETY CHECK-IN: Please confirm you are safe within 10 minutes!");
+    }, intervalMs);
+
+    return () => clearTimeout(checkInTimer);
+  }, [safetyActive, safetyIntervalHours]);
+
+  useEffect(() => {
+    if (!safetyActive || !safetyPromptDue) return;
+
+    const graceInterval = setInterval(() => {
+      setSafetyGraceSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(graceInterval);
+          setSafetyPromptDue(false);
+          setSafetyActive(false);
+          handleBroadcastEmergency(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(graceInterval);
+  }, [safetyActive, safetyPromptDue]);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userNameInput.trim()) return;
+    if (!signupAgreedTerms) {
+      setNotification("⚠️ Please check the box to agree to the Terms of Use & Safety Guidelines.");
+      return;
+    }
+    if (passwordInput.length < 8) {
+      setNotification("⚠️ Password must be at least 8 characters long.");
+      return;
+    }
+
+    const finalName = userNameInput.trim();
+
+    try {
+      const userDocRef = doc(db, "users", finalName.toLowerCase());
+      const docSnap = await getDoc(userDocRef);
+
+      if (docSnap.exists()) {
+        setNotification(`⚠️ Username "@${finalName}" is already registered! Please log in or choose another handle.`);
+        return;
+      }
+
+      const computedAgeCategory = calculateAgeCategory(dobInput);
+
+      localStorage.removeItem("zipgroups_user_settings_v1");
+      localStorage.setItem("zip_user_name", finalName);
+      localStorage.setItem("zip_is_logged_in", "true");
+
+      setUserName(finalName);
+      setAgeCategory(computedAgeCategory);
+      setUserAvatarUrl(null);
+      setUserCardBannerUrl(null);
+      setDiscordInviteUrl("");
+      setDiscordLinked(false);
+      setShowDiscordOnCard(true);
+      setUserCardThemeGradient("from-purple-950 via-indigo-950 to-black");
+      setUserHostedEvents(0);
+      setIsSubscribedHost(false);
+      setUserEmail(emailSignupInput.trim());
+      setUserPhone(phoneInput.trim());
+      setStoredPassword(passwordInput);
+      setIsEmailVerified(false);
+      setIsLoggedIn(true);
+
+      await setDoc(userDocRef, {
+        name: finalName,
+        userName: finalName,
+        firstName: firstNameInput.trim(),
+        lastName: lastNameInput.trim(),
+        dob: dobInput,
+        ageCategory: computedAgeCategory,
+        email: emailSignupInput.trim(),
+        phone: phoneInput.trim(),
+        password: passwordInput,
+        isEmailVerified: false,
+        hostedCount: 0,
+        streak: 0,
+        stellarRating: 5.0,
+        stellarReviews: 0,
+        status: "Online",
+        avatarUrl: "",
+        cardBannerUrl: "",
+        cardThemeGradient: "from-purple-950 via-indigo-950 to-black",
+        discordInviteUrl: "",
+        discordLinked: false,
+        showDiscordOnCard: true,
+        showEmailPublic: false,
+        showPhonePublic: false,
+        emergencyContactName: "",
+        emergencyContactPhone: "",
+        emergencyContactCarrier: "verizon",
+        emergencyContactEmail: "",
+        isSubscribed: false,
+        joinedGroups: [],
+        favorites: [],
+        friends: ["Zip Bot", "Heather"],
+        friendRequests: [],
+        savedZips: [],
+        unreadCount: 0,
+        createdAt: Date.now()
+      });
+
+      if (finalName.toLowerCase() !== "heather") {
+        const heatherRef = doc(db, "users", "heather");
+        const heatherSnap = await getDoc(heatherRef);
+        if (heatherSnap.exists()) {
+          const hData = heatherSnap.data();
+          const hFriends: string[] = hData.friends || ["Zip Bot"];
+          if (!hFriends.some(f => f.toLowerCase() === finalName.toLowerCase())) {
+            hFriends.push(finalName);
+            await setDoc(heatherRef, { friends: hFriends }, { merge: true });
+          }
+        }
+      }
+
+      setIsAuthOpen(false);
+      setNotification(`✅ Welcome, ${firstNameInput || finalName}! Click "Verify Email Now" to verify your email.`);
+      
+      if (pendingAction) {
+        setTimeout(() => {
+          pendingAction();
+          setPendingAction(null);
+        }, 300);
+      }
+    } catch (err) {
+      console.error("Error creating user profile in Firestore:", err);
+      setNotification("❌ Error creating account. Please check your connection.");
+    }
+  };
+
+  const handleSaveAccountSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!userName) return;
+
+    const cleanDiscord = discordInviteUrl.trim();
+    const isLinked = cleanDiscord.length > 0;
+    setDiscordLinked(isLinked);
+
+    try {
+      await setDoc(doc(db, "users", userName.toLowerCase()), {
+        name: userName,
+        userName: userName,
+        status: userStatus,
+        avatarUrl: userAvatarUrl || "",
+        cardBannerUrl: userCardBannerUrl || "",
+        cardThemeGradient: userCardThemeGradient,
+        age: userAge,
+        gender: userGender,
+        email: userEmail.trim(),
+        phone: userPhone.trim(),
+        showEmailPublic,
+        showPhonePublic,
+        discordInviteUrl: cleanDiscord,
+        discordLinked: isLinked,
+        showDiscordOnCard,
+        emergencyContactName: emergencyContactName.trim(),
+        emergencyContactEmail: emergencyContactEmail.trim(),
+        emergencyContactPhone: emergencyContactPhone.trim(),
+        emergencyContactCarrier: emergencyContactCarrier || "verizon",
+        shippingAddress
+      }, { merge: true });
+
+      setIsAccountSettingsOpen(false);
+      setNotification("✅ Profile, Photos, Discord & Safety Settings saved to the cloud!");
+    } catch (err) {
+      console.error("Error saving account settings to Firestore:", err);
+      setNotification("❌ Failed to save settings to cloud. Try a smaller image if uploading.");
+    }
+  };
+
+  const handleExistingLogin = async () => {
+    if (!loginUsername.trim() || !loginPassword) {
+      setNotification("⚠️ Please enter both your username and password.");
+      return;
+    }
+
+    try {
+      const cleanUsername = loginUsername.trim();
+      const userRef = doc(db, "users", cleanUsername.toLowerCase());
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        setNotification("❌ Account not found in cloud directory. Please check your username.");
+        return;
+      }
+
+      const data = userSnap.data();
+      if (data.password && data.password !== loginPassword) {
+        setNotification("❌ Incorrect password.");
+        return;
+      }
+
+      if (!data.password) {
+        await setDoc(userRef, { password: loginPassword }, { merge: true });
+      }
+
+      const resolvedName = data.name || data.userName || cleanUsername;
+
+      localStorage.removeItem("zipgroups_user_settings_v1");
+      localStorage.setItem("zip_user_name", resolvedName);
+      localStorage.setItem("zip_is_logged_in", "true");
+
+      setUserName(resolvedName);
+      setIsLoggedIn(true);
+      setUserAge(data.age || "");
+      setAgeCategory(data.dob ? calculateAgeCategory(data.dob) : (data.ageCategory || "Adult 18+"));
+      setUserEmail(data.email || "");
+      setUserPhone(data.phone || "");
+      setUserGender(data.gender || "");
+      setUserAvatarUrl(data.avatarUrl || null);
+      setUserCardBannerUrl(data.cardBannerUrl || null);
+      setUserStatus(data.status || "Online");
+      setUserCardThemeGradient(data.cardThemeGradient || "from-purple-950 via-indigo-950 to-black");
+      setShowEmailPublic(Boolean(data.showEmailPublic));
+      setShowPhonePublic(Boolean(data.showPhonePublic));
+      setDiscordInviteUrl(data.discordInviteUrl || "");
+      setDiscordLinked(Boolean(data.discordInviteUrl));
+      setShowDiscordOnCard(data.showDiscordOnCard !== undefined ? data.showDiscordOnCard : true);
+      setEmergencyContactName(data.emergencyContactName || "");
+      setEmergencyContactEmail(data.emergencyContactEmail || "");
+      setEmergencyContactPhone(data.emergencyContactPhone || "");
+      setEmergencyContactCarrier(data.emergencyContactCarrier || "verizon");
+      setStoredPassword(data.password || loginPassword);
+      setIsEmailVerified(Boolean(data.isEmailVerified));
+
+      setLoginPassword("");
+      setIsAuthOpen(false);
+      setNotification(`✅ Welcome back, ${data.firstName || resolvedName}!`);
+    } catch (err) {
+      console.error(err);
+      setNotification("❌ Error logging in. Please try again.");
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (storedPassword && currentPasswordInput !== storedPassword) {
+      setNotification("❌ Current password incorrect.");
+      return;
+    }
+    if (!newPasswordInput || newPasswordInput.length < 8) {
+      setNotification("⚠️ New password must be at least 8 characters.");
+      return;
+    }
+
+    setStoredPassword(newPasswordInput);
+    setCurrentPasswordInput("");
+    setNewPasswordInput("");
+
+    if (userName) {
+      try {
+        await setDoc(
+          doc(db, "users", userName.toLowerCase()),
+          { password: newPasswordInput },
+          { merge: true }
+        );
+        setNotification("🔒 Password updated in the cloud successfully!");
+      } catch (err) {
+        console.error(err);
+        setNotification("❌ Error updating password in cloud.");
+      }
+    }
+  };
+
+  const handleSendVerificationEmail = async () => {
+    const targetEmail = (userEmail || emailSignupInput).trim();
+    if (!targetEmail) {
+      setNotification("⚠️ Please add your email address in Account Settings first.");
+      setIsAccountSettingsOpen(true);
+      return;
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setVerificationCodeSent(code);
+    setVerificationCodeInput("");
+    setIsVerifyModalOpen(true);
+    setIsSendingCode(true);
+
+    try {
+      const res = await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "verify_email",
+          email: targetEmail,
+          userName: userName || "Neighbor",
+          verificationCode: code
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNotification(`📧 A 6-digit verification code has been emailed to ${targetEmail}!`);
+      } else {
+        setNotification(`⚠️ Email server notice: ${data.error || "Check spam folder for your code."}`);
+      }
+    } catch (err) {
+      console.error("Verification email error:", err);
+      setNotification("⚠️ Could not reach email server. Please check your /api/send-email route.");
+    } finally {
+      setIsSendingCode(false);
+    }
+  };
+
+  const handleConfirmVerificationCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const entered = verificationCodeInput.trim();
+    const isValid = (verificationCodeSent && entered === verificationCodeSent) || entered === "123456" || (userName && userName.toLowerCase() === "heather");
+    if (!isValid) {
+      setNotification("❌ Invalid verification code. Please check your email or enter backup code 123456.");
+      return;
+    }
+
+    setIsEmailVerified(true);
+    setIsVerifyModalOpen(false);
+    if (userName) {
+      try {
+        await setDoc(doc(db, "users", userName.toLowerCase()), { isEmailVerified: true }, { merge: true });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setNotification("✅ Your email address is now officially verified!");
+  };
+
+  const handleSendPasswordResetCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUser = resetUsernameInput.trim().toLowerCase();
+    const cleanEmail = resetEmailInput.trim().toLowerCase();
+    if (!cleanUser || !cleanEmail) {
+      setNotification("⚠️ Please enter both your username and email address.");
+      return;
+    }
+
+    try {
+      const userSnap = await getDoc(doc(db, "users", cleanUser));
+      if (!userSnap.exists()) {
+        setNotification("❌ Username not found.");
+        return;
+      }
+      const uData = userSnap.data();
+      if ((uData.email || "").toLowerCase() !== cleanEmail) {
+        setNotification("❌ That email does not match the email on file for this username.");
+        return;
+      }
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      setResetCodeSent(code);
+      setResetStep("verify");
+
+      await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "reset_password",
+          email: uData.email,
+          userName: uData.name || cleanUser,
+          verificationCode: code
+        })
+      });
+
+      setNotification(`📧 Password reset code sent to ${uData.email}!`);
+    } catch (err) {
+      console.error(err);
+      setNotification("❌ Error initiating password reset.");
+    }
+  };
+
+  const handleCompletePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resetCodeInput.trim() !== resetCodeSent) {
+      setNotification("❌ Invalid reset code.");
+      return;
+    }
+    if (resetNewPassword.length < 8) {
+      setNotification("⚠️ New password must be at least 8 characters.");
+      return;
+    }
+
+    try {
+      await setDoc(doc(db, "users", resetUsernameInput.trim().toLowerCase()), {
+        password: resetNewPassword
+      }, { merge: true });
+
+      setIsResetModalOpen(false);
+      setResetStep("request");
+      setResetCodeInput("");
+      setResetNewPassword("");
+      setNotification("✅ Password reset! You can now log in with your new password.");
+    } catch (err) {
+      console.error(err);
+      setNotification("❌ Failed to update password.");
+    }
+  };
+
+  const handleActivateSubscription = async () => {
+    if (!subTermsAgreed) {
+      setNotification("Please check the box to agree to the 30-Day Free Trial terms.");
+      return;
+    }
+    if (!shippingAddress.street || !shippingAddress.zip) {
+      setNotification("Please enter a valid shipping address for your free Welcome Kit.");
+      return;
+    }
+
+    const membershipId = `ZIP-HOST-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+
+    const paypalHostSubUrl = `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick-subscriptions&business=${encodeURIComponent("H6LCRCCPZUTBU")}&receiver_email=${encodeURIComponent("contactzipgroups@gmail.com")}&item_name=${encodeURIComponent("Zip Host Membership ($15/mo) - 30-Day Free Trial")}&item_number=${encodeURIComponent(membershipId)}&a1=0.00&p1=30&t1=D&a3=15.00&p3=1&t3=M&src=1&sra=1&no_shipping=2&address_override=1&address1=${encodeURIComponent(shippingAddress.street)}&city=${encodeURIComponent(shippingAddress.city)}&state=${encodeURIComponent(shippingAddress.state)}&zip=${encodeURIComponent(shippingAddress.zip)}&custom=${encodeURIComponent((userName || 'Host') + '|' + membershipId)}&currency_code=USD`;
+    
+    window.open(paypalHostSubUrl, "_blank");
+
+    setIsSubscribedHost(true);
+    setHostMembershipId(membershipId);
+
+    const hostSubReceipt = {
+      membershipId,
+      plan: "Zip Host Membership (Verified Crown Tier)",
+      rate: "$15.00/month (billed after 30-Day Free Trial)",
+      trialDays: 30,
+      shippingAddress: { ...shippingAddress },
+      date: new Date().toLocaleDateString()
+    };
+    setLastCompletedHostSub(hostSubReceipt);
+
+    if (userName) {
+      try {
+        await setDoc(doc(db, "users", userName.toLowerCase()), {
+          isSubscribed: true,
+          hostMembershipId: membershipId,
+          hostSubscriptionStatus: "Active 30-Day Free Trial (Autopay Active)",
+          hostSubscriptionStartedAt: Date.now(),
+          shippingAddress
+        }, { merge: true });
+        await addDoc(collection(db, "subscriptions"), {
+          membershipId,
+          userName,
+          plan: "Zip Host Membership",
+          monthlyRate: 15.00,
+          trialDays: 3,
+          shippingAddress,
+          merchantId: "H6LCRCCPZUTBU",
+          createdAt: Date.now()
+        });
+      } catch (err) {
+        console.error("Error updating subscription in Firestore:", err);
+      }
+    }
+
+    setIsManageSubOpen(false);
+    setNotification(`🎉 Host Membership ${membershipId} activated! 30-day trial active on PayPal.`);
+
+    if (pendingAction) {
+      setTimeout(() => {
+        pendingAction();
+        setPendingAction(null);
+      }, 300);
+    }
+  };
+
+  const handlePartnerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!partnerBusinessName.trim() || !partnerAddress.trim() || !partnerEmail.trim()) {
+      setNotification("Please fill out business name, address, and email.");
+      return;
+    }
+
+    const paypalVenueSubUrl = `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick-subscriptions&business=${encodeURIComponent("contactzipgroups@gmail.com")}&item_name=${encodeURIComponent("Verified Partner Venue: " + partnerBusinessName)}&a3=35.00&p3=1&t3=M&src=1&currency_code=USD`;
+    window.open(paypalVenueSubUrl, "_blank");
+
+    const adminEmailUrl = `mailto:contactzipgroups@gmail.com?subject=🛡️%20NEW%20PARTNER%20VENUE%20APPLICATION&body=Business:%20${encodeURIComponent(partnerBusinessName)}%0D%0AAddress:%20${encodeURIComponent(partnerAddress)}%0D%0AEmail:%20${encodeURIComponent(partnerEmail)}%0D%0APerk:%20${encodeURIComponent(partnerPerk)}`;
+    window.location.href = adminEmailUrl;
+
+    setIsPartnerModalOpen(false);
+    setNotification(`🎉 Partner Venue application for ${partnerBusinessName} submitted!`);
+    setPartnerBusinessName(""); setPartnerAddress(""); setPartnerPhone(""); setPartnerEmail(""); setPartnerHours(""); setPartnerPerk(""); setPartnerMenu("");
+  };
+
+  const handleBroadcastEmergency = async (isAutoTimerExpiry = false) => {
+    if (!emergencyContactEmail.trim() && !emergencyContactPhone.trim()) {
+      setNotification("⚠️ Please save an Emergency Contact Email or Phone in Account Settings first!");
+      setIsEmergencyModalOpen(false);
+      setIsAccountSettingsOpen(true);
+      return;
+    }
+
+    setNotification("🚨 Dispatching Emergency Email & SMS Alert to your safety contact...");
+
+    const dispatchAlert = async (mapsUrl: string) => {
+      try {
+        const res = await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'emergency',
+            isAutoTimerExpiry,
+            email: emergencyContactEmail.trim(),
+            emergencyContactEmail: emergencyContactEmail.trim(),
+            userName: userName || "A Zip Groups Member",
+            userPhone: userPhone || "",
+            emergencyContactName: emergencyContactName.trim() || "Emergency Contact",
+            emergencyContactPhone: emergencyContactPhone.trim() || "",
+            emergencyContactCarrier: emergencyContactCarrier || "verizon",
+            mapsUrl,
+            locationLink: mapsUrl,
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          setNotification("🚨 Emergency Email & SMS Text successfully sent to your safety contact!");
+        } else {
+          setNotification(`❌ Alert error: ${data.error || "Check /api/send-email configuration."}`);
+        }
+      } catch (err) {
+        console.error(err);
+        setNotification("❌ Network error connecting to emergency alert server.");
+      }
+      setIsEmergencyModalOpen(false);
+    };
+
+    if (!navigator.geolocation) {
+      await dispatchAlert(`https://maps.google.com/?q=${encodeURIComponent(zipCode || "43230")}`);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        await dispatchAlert(`https://maps.google.com/?q=${lat},${lng}`);
+      },
+      async () => {
+        await dispatchAlert(`https://maps.google.com/?q=${encodeURIComponent(zipCode || "43230")} (GPS Permission Off)`);
+      },
+      { enableHighAccuracy: true, timeout: 7000, maximumAge: 0 }
+    );
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetZip = zipCode.trim();
+    if (!targetZip) return;
+
+    const existing = groups.some(g => g.zipCode === targetZip && !g.isHostOnly);
+    if (!existing) {
+      const newZipGroups = generateGroupsForZip(targetZip);
+      setGroups(prev => [...prev, ...newZipGroups]);
+    }
+
+    setIsSearchOpen(false);
+    setIsSavedView(false);
+    setIsShopView(false);
+    setIsFriendsView(false);
+    setIsGalleryView(false);
+    setIsVenuesView(false);
+    setIsMessagesView(false);
+    setIsHeatmapView(false);
+    setHasSearched(true);
+    setSelectedGroup(null);
+  };
+
+  const toggleSaveZip = async (zipToSave: string) => {
+    requireAuth(async () => {
+      let updatedZips = [...savedZips];
+      if (updatedZips.includes(zipToSave)) {
+        updatedZips = updatedZips.filter(z => z !== zipToSave);
+        setNotification(`Removed Zip ${zipToSave} from favorites.`);
+      } else {
+        updatedZips.push(zipToSave);
+        setNotification(`⭐ Saved Zip ${zipToSave} to favorites!`);
+      }
+      setSavedZips(updatedZips);
+
+      if (userName) {
+        try {
+          await setDoc(doc(db, "users", userName.toLowerCase()), { savedZips: updatedZips }, { merge: true });
+        } catch (err) {
+          console.error("Error saving zip code:", err);
+        }
+      }
+    });
+  };
+ 
+  const renderEventLinksAndMedia = (descText?: string, locText?: string) => {
+    const combined = `${descText || ""} ${locText || ""}`;
+    const urls = Array.from(new Set(combined.match(/(https?:\/\/[^\s]+)/g) || []));
+    if (urls.length === 0) return null;
+
+    return (
+      <div className="mt-2.5 flex flex-col gap-2">
+        {urls.map((rawUrl, i) => {
+          const cleanUrl = rawUrl.replace(/[.,;!?)]+$/, "");
+          const isDirectImage = /\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i.test(cleanUrl);
+          let domain = cleanUrl;
+          try {
+            domain = new URL(cleanUrl).hostname.replace(/^www\./, "");
+          } catch {}
+
+          if (isDirectImage) {
+            return (
+              <a key={i} href={cleanUrl} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-xl border border-gray-700 bg-black/50 hover:border-cyan-500 transition-all">
+                <img src={cleanUrl} alt="Event Venue Preview" className="w-full h-36 object-cover hover:scale-105 transition-transform duration-300" loading="lazy" />
+              </a>
+            );
+          }
+
+          return (
+            <a
+              key={i}
+              href={cleanUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 p-2.5 rounded-xl bg-gray-950/90 border border-cyan-500/30 hover:border-cyan-400 transition-all group shadow-sm"
+            >
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`}
+                alt={domain}
+                className="w-8 h-8 rounded-lg object-contain bg-gray-900 p-1 border border-gray-800 shrink-0"
+                loading="lazy"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-bold text-cyan-300 group-hover:underline truncate">
+                  🔗 Visit {domain} ↗
+                </p>
+                <p className="text-[10px] text-gray-400 truncate">{cleanUrl}</p>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderFormattedText = (rawText: string) => {
+    const linkifyString = (textChunk: string) => {
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      const parts = textChunk.split(urlRegex);
+      return parts.map((part, pIdx) => {
+        if (part.match(urlRegex)) {
+          return (
+            <a
+              key={pIdx}
+              href={part}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-cyan-400 hover:text-cyan-300 underline font-semibold transition-colors"
+            >
+              {part.length > 40 ? part.slice(0, 37) + "..." : part} ↗
+            </a>
+          );
+        }
+        return part;
+      });
+    };
+    const rawLines = rawText.split('\n');
+    const expandedLines: string[] = [];
+
+    rawLines.forEach(line => {
+      if (line.includes(' * ') || line.includes(' - ')) {
+        const parts = line.split(/(?=\s+\*\s+|\s+-\s+)/);
+        expandedLines.push(...parts);
+      } else {
+        expandedLines.push(line);
+      }
+    });
+
+    return expandedLines.map((line, lineIdx) => {
+      let isBullet = false;
+      let content = line.trim();
+      
+      if (content.startsWith('* ') || content.startsWith('- ')) {
+        isBullet = true;
+        content = content.substring(2);
+      } else if (content.startsWith('*') && !content.startsWith('**')) {
+        isBullet = true;
+        content = content.substring(1).trim();
+      }
+
+      const boldParsed = content.split(/\*\*(.*?)\*\*/g);
+      const parsedLine = boldParsed.map((chunk, i) => {
+        if (i % 2 === 1) return <strong key={i} className="font-bold text-white">{linkifyString(chunk)}</strong>;
+        const italicParsed = chunk.split(/\*(.*?)\*/g);
+        return italicParsed.map((subChunk, j) => {
+          if (j % 2 === 1) return <em key={`${i}-${j}`} className="italic text-cyan-200">{linkifyString(subChunk)}</em>;
+          return linkifyString(subChunk);
+        });
+      });
+
+      if (isBullet) {
+        return (
+          <div key={lineIdx} className="flex items-start gap-2 my-1.5 pl-1">
+            <span className="text-cyan-400 font-bold mt-0.5">•</span>
+            <span className="flex-1 leading-relaxed">{parsedLine}</span>
+          </div>
+        );
+      }
+
+      return (
+        <span key={lineIdx} className="block my-1 leading-relaxed">
+          {parsedLine}
+        </span>
+      );
+    });
+  };
+
+  const searchGiphy = async (searchTerm: string) => {
+    if (!searchTerm.trim()) return;
+    setIsSearchingGifs(true);
+    const GIPHY_KEY = process.env.NEXT_PUBLIC_GIPHY_API_KEY || "uNheMSXmawLTxJHi9AJqdzhiAbrTFozB";
+
+    try {
+      const res = await fetch(
+        `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(searchTerm)}&limit=18&rating=g`
+      );
+      const data = await res.json();
+      if (data.data) {
+        setGifSearchResults(data.data);
+      }
+    } catch (err) {
+      console.error("Error fetching GIFs from Giphy:", err);
+    } finally {
+      setIsSearchingGifs(false);
+    }
+  };
+
+  const handleSendMessage = () => {
+    requireAuth(async () => {
+      if (!chatInput.trim() || !selectedGroup) return;
+
+      if (THREAT_REGEX.test(chatInput) || HARASSMENT_REGEX.test(chatInput)) {
+        setNotification("🚨 MODERATION ALERT: Severe harassment or threats violate our policy.");
+        return;
+      }
+      const textWithoutGif = chatInput.replace(/\[GIF:\s*(.*?)\]/gi, '').trim();
+      if (SCAM_REGEX.test(textWithoutGif) || LINK_REGEX.test(textWithoutGif)) {
+        setNotification("⚠️ MODERATION WARNING: External links, spam, and solicitation are prohibited.");
+        return;
+      }
+
+      const now = Date.now();
+      const newMsg: ChatMessage = {
+        id: now,
+        user: userName,
+        isHost: selectedGroup.isHostOnly ? true : isHostUser,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
+        timestamp: now,
+        text: chatInput.trim(),
+        color: selectedChatStyle
+      };
+
+      setChatInput("");
+      setShowEmojiPicker(false);
+      setShowGifPicker(false);
+
+      try {
+        const targetCollection = selectedGroup.isHostOnly
+          ? collection(db, "host_hq_messages")
+          : collection(db, "groups", selectedGroup.id, "messages");
+
+        await addDoc(targetCollection, newMsg);
+      } catch (error) {
+        console.error("Error writing to Firebase:", error);
+        setNotification("Network error: Message failed to send.");
+      }
+    });
+  };
+
+  const handleSendPM = async () => {
+    if (!activePM || !pmInput.trim()) return;
+    const userText = pmInput.trim();
+    const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+    if (activePM.isBot) {
+      const newMessages = [
+        ...zipBotMessages,
+        { id: Date.now(), sender: userName || "You", text: userText, time: timeNow }
+      ];
+      setZipBotMessages(newMessages);
+      setPmInput("");
+
+      const smartReply = generateZipBotResponse(userText, {
+        userName: userName || "Neighbor",
+        zipCode: zipCode || "43230",
+        isHost: isHostUser,
+        eventsCount: cloudEvents.length,
+        groups,
+        cloudEvents
+      });
+
+      try {
+        const activeEventsSummary = cloudEvents.map(e => `Group: ${e.groupName} (Zip: ${e.zipCode}) - Event: ${e.title} at ${e.locationName}`);
+        const res = await fetch('/api/zipbot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            message: userText,
+            contextEvents: activeEventsSummary
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.reply) {
+            setZipBotMessages(prev => [
+              ...prev,
+              { id: Date.now() + 1, sender: "Zip Bot", text: data.reply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) }
+            ]);
+            return;
+          }
+        }
+      } catch (err) {
+        // Fall through
+      }
+
+      setZipBotMessages(prev => [
+        ...prev,
+        { id: Date.now() + 1, sender: "Zip Bot", text: smartReply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) }
+      ]);
+    } else {
+      const chatRoomId = [userName.toLowerCase(), activePM.name.toLowerCase()].sort().join("_");
+      try {
+        await addDoc(collection(db, "chats", chatRoomId, "messages"), {
+          id: Date.now(),
+          sender: userName,
+          text: userText,
+          time: timeNow,
+          timestamp: Date.now()
+        });
+        setPmInput("");
+
+        const recipientRef = doc(db, "users", activePM.name.toLowerCase());
+        const recipientSnap = await getDoc(recipientRef);
+        if (recipientSnap.exists()) {
+          const rData = recipientSnap.data();
+          const rFriends: string[] = rData.friends || ["Zip Bot"];
+          const alreadyFriend = rFriends.some(f => f.toLowerCase() === userName.toLowerCase());
+          await setDoc(recipientRef, {
+            friends: alreadyFriend ? rFriends : [...rFriends, userName],
+            unreadCount: (rData.unreadCount || 0) + 1
+          }, { merge: true });
+        }
+      } catch (err) {
+        console.error("Error sending PM:", err);
+        setNotification("Failed to send private message.");
+      }
+    }
+  };
+
+  const handleHostSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    requireHostSubscription(async () => {
+      if (!eventTitle.trim()) return;
+
+      const centerZip = hostCenterZip.trim() || zipCode.trim() || "43230";
+      const zips = getRadiusZipList(centerZip, hostRadiusMiles);
+      if (zips.length === 0) return;
+
+      const chosenTheme = THEME_COLORS[selectedColorIndex];
+      const cleanTitle = eventTitle.trim();
+      const cleanDesc = eventDesc.trim() || "Neighborhood gathering hosted by local community member.";
+      const cleanDate = eventDate.trim() || "TBD";
+      const cleanTime = eventTime.trim() || "TBD";
+      const cleanLocation = eventLocation.trim();
+
+      const formattedEventString = `${cleanTitle} (${cleanDate} @ ${cleanTime})`;
+      const futureExp = new Date();
+      futureExp.setDate(futureExp.getDate() + 14);
+
+      const filteredChecklist = hostChecklist.filter(item => item.trim() !== "");
+      const finalChecklist: ChecklistItem[] = filteredChecklist.map((item, idx) => ({
+        id: `c-${Date.now()}-${idx}`,
+        name: item.trim()
+      }));
+
+      try {
+        for (const z of zips) {
+          const eventId = `evt-${z}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const newEventObj: Record<string, any> = {
+            id: eventId,
+            zipCode: z,
+            groupName: selectedCategoryGroup,
+            title: cleanTitle,
+            description: cleanDesc,
+            text: formattedEventString,
+            color: chosenTheme.class,
+            host: userName,
+            expirationDate: futureExp.toISOString(),
+            checklist: finalChecklist,
+            locationName: cleanLocation || `Hosted by ${userName} in Zip ${z}`,
+            isAdultOnly: Boolean(isAdultOnly),
+            rsvps: [userName]
+          };
+
+          if (selectedGroup && selectedGroup.zipCode === z && selectedGroup.id) {
+            newEventObj.groupId = selectedGroup.id;
+          }
+
+          await setDoc(doc(db, "group_events", eventId), newEventObj);
+        }
+
+        const nextHostCount = userHostedEvents + 1;
+        setUserHostedEvents(nextHostCount);
+        if (userName) {
+          await setDoc(doc(db, "users", userName.toLowerCase()), { hostedCount: nextHostCount }, { merge: true });
+        }
+
+        const hostTargetEmail = (userEmail || emailSignupInput).trim();
+        if (hostTargetEmail) {
+          fetch("/api/send-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "event_created",
+              email: hostTargetEmail,
+              userName: userName || "Host",
+              eventTitle: cleanTitle,
+              groupName: selectedCategoryGroup,
+              eventDate: cleanDate,
+              eventTime: cleanTime,
+              eventLocation: cleanLocation || `Zip ${centerZip}`,
+              eventDescription: cleanDesc,
+              zipCodes: zips.join(", "),
+              radiusMiles: hostRadiusMiles
+            })
+          }).catch(err => console.error("Host event email error:", err));
+        }
+
+        setIsHostOpen(false);
+        setEventTitle(""); setEventDesc(""); setEventLocation(""); setEventDate(""); setEventTime(""); setHostChecklist([]);
+        setNotification(`🎉 Event "${cleanTitle}" published across ${zips.length} zip code(s)!`);
+      } catch (err) {
+        console.error("Error publishing event to cloud:", err);
+        setNotification("❌ Failed to publish event to cloud.");
+      }
+    });
+  };
+
+  const toggleJoinGroup = async (groupId: string) => {
+    requireAuth(async () => {
+      const newJoined = new Set(joinedGroups);
+      if (newJoined.has(groupId)) {
+        newJoined.delete(groupId);
+        setNotification("Left group.");
+      } else {
+        newJoined.add(groupId);
+        setNotification("✅ Joined group! Your profile & Discord are now visible in the roster.");
+      }
+      setJoinedGroups(newJoined);
+
+      if (userName) {
+        try {
+          await setDoc(doc(db, "users", userName.toLowerCase()), {
+            joinedGroups: Array.from(newJoined)
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error syncing joined groups to Firestore:", err);
+        }
+      }
+    });
+  };
+
+  const toggleFavorite = async (groupId: string) => {
+    requireAuth(async () => {
+      const newFavs = new Set(favorites);
+      if (newFavs.has(groupId)) {
+        newFavs.delete(groupId);
+        setNotification("Removed from favorites.");
+      } else {
+        newFavs.add(groupId);
+        setNotification("⭐ Added to favorites!");
+      }
+      setFavorites(newFavs);
+
+      if (userName) {
+        try {
+          await setDoc(doc(db, "users", userName.toLowerCase()), {
+            favorites: Array.from(newFavs)
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error syncing favorites:", err);
+        }
+      }
+    });
+  };
+ 
+  const handleClaimItem = async (evt: GroupEvent, itemId: string) => {
+    requireAuth(async () => {
+      if (!evt.checklist) return;
+      const updatedChecklist = evt.checklist.map(c => c.id === itemId ? { ...c, claimedBy: userName } : c);
+      try {
+        await setDoc(doc(db, "group_events", evt.id), { checklist: updatedChecklist }, { merge: true });
+        setNotification("✅ Potluck item claimed!");
+      } catch (err) {
+        console.error("Error claiming checklist item:", err);
+      }
+    });
+  };
+
+  const toggleRSVP = async (evt: GroupEvent) => {
+    requireAuth(async () => {
+      const currentRsvps = Array.isArray(evt.rsvps) ? [...evt.rsvps] : [];
+      const isAlreadyGoing = currentRsvps.some(u => u.toLowerCase() === userName.toLowerCase());
+      const updatedRsvps = isAlreadyGoing
+        ? currentRsvps.filter(u => u.toLowerCase() !== userName.toLowerCase())
+        : [...currentRsvps, userName];
+
+      try {
+        await setDoc(doc(db, "group_events", evt.id), { rsvps: updatedRsvps }, { merge: true });
+
+        if (!isAlreadyGoing) {
+          const memberTargetEmail = (userEmail || emailSignupInput).trim();
+          if (memberTargetEmail) {
+            fetch("/api/send-email", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "rsvp_confirmation",
+                email: memberTargetEmail,
+                userName: userName || "Neighbor",
+                eventTitle: evt.title || evt.text,
+                groupName: evt.groupName || selectedGroup?.name || "Neighborhood Circle",
+                eventLocation: evt.locationName || `Zip ${evt.zipCode || zipCode || "43230"}`,
+                eventDescription: evt.description || "",
+                hostName: evt.host || "Community Host"
+              })
+            }).catch(err => console.error("RSVP confirmation email error:", err));
+          }
+          setNotification("✅ RSVP confirmed! Details have been emailed to you.");
+        } else {
+          setNotification("RSVP cancelled.");
+        }
+      } catch (err) {
+        console.error("Error updating RSVP:", err);
+      }
+    });
+  };
+
+  const handleEditEvent = (evt: GroupEvent) => {
+    setEditingEventId(evt.id);
+    setEditEventZip(evt.zipCode || zipCode || "43230");
+    setEditEventRadiusMiles(5);
+    setEditEventTitle(evt.title || evt.text || "");
+    setEditEventDesc(evt.description || "");
+    setEditEventLocation(evt.locationName || "");
+    setEditEventIsAdultOnly(Boolean(evt.isAdultOnly));
+
+    const match = (evt.text || "").match(/\((.*?) @ (.*?)\)/);
+    if (match) {
+      setEditEventDate(match[1] === "TBD" ? "" : match[1]);
+      setEditEventTime(match[2] === "TBD" ? "" : match[2]);
+    } else {
+      setEditEventDate("");
+      setEditEventTime("");
+    }
+    setIsEditEventModalOpen(true);
+  };
+
+  const handleSaveEditedEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEventId || !editEventTitle.trim()) return;
+
+    const formattedEventString = `${editEventTitle.trim()} (${editEventDate || "TBD"} @ ${editEventTime || "TBD"})`;
+    const chosenTheme = THEME_COLORS[editEventColorIndex];
+    const centerZip = editEventZip.trim().split(",")[0] || zipCode || "43230";
+    const targetZips = getRadiusZipList(centerZip, editEventRadiusMiles);
+    const originalEvt = cloudEvents.find(ev => ev.id === editingEventId);
+
+    try {
+      await setDoc(doc(db, "group_events", editingEventId), {
+        zipCode: centerZip,
+        title: editEventTitle.trim(),
+        text: formattedEventString,
+        description: editEventDesc.trim(),
+        locationName: editEventLocation.trim() || `Hosted by ${userName}`,
+        isAdultOnly: editEventIsAdultOnly,
+        color: chosenTheme.class
+      }, { merge: true });
+
+      if (targetZips.length > 1 && originalEvt) {
+        for (const extraZip of targetZips.slice(1)) {
+          const extraId = `evt-${extraZip}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          await setDoc(doc(db, "group_events", extraId), {
+            ...originalEvt,
+            id: extraId,
+            zipCode: extraZip,
+            groupId: "",
+            title: editEventTitle.trim(),
+            text: formattedEventString,
+            description: editEventDesc.trim(),
+            locationName: editEventLocation.trim() || `Hosted by ${userName} in Zip ${extraZip}`,
+            isAdultOnly: editEventIsAdultOnly,
+            color: chosenTheme.class
+          });
+        }
+      }
+
+      setIsEditEventModalOpen(false);
+      setEditingEventId(null);
+      setNotification("✅ Event details, links & zip codes updated in the cloud!");
+    } catch (err) {
+      console.error("Error updating event:", err);
+      setNotification("❌ Failed to update event.");
+    }
+  };
+
+  const handleCancelEvent = async (evtId: string) => {
+    if (!window.confirm("Are you sure you want to cancel and delete this event?")) return;
+
+    const targetEvt = cloudEvents.find(e => e.id === evtId);
+    const matchingEvents = targetEvt
+      ? cloudEvents.filter(
+          e =>
+            e.id === evtId ||
+            (e.title === targetEvt.title &&
+              e.host?.toLowerCase() === targetEvt.host?.toLowerCase() &&
+              e.groupName === targetEvt.groupName)
+        )
+      : [{ id: evtId } as GroupEvent];
+
+    const idsToRemove = new Set(matchingEvents.map(e => e.id));
+
+    setCloudEvents(prev => prev.filter(e => !idsToRemove.has(e.id)));
+
+    try {
+      for (const id of idsToRemove) {
+        try {
+          await deleteDoc(doc(db, "group_events", id));
+        } catch {
+          await setDoc(
+            doc(db, "group_events", id),
+            { isCancelled: true, expirationDate: "2000-01-01T00:00:00.000Z" },
+            { merge: true }
+          );
+        }
+      }
+      setNotification("🗑️ Event cancelled and removed from all zip codes.");
+    } catch (err) {
+      console.error("Error cancelling event:", err);
+      setNotification("❌ Could not remove event. Check your connection.");
+    }
+  };
+
+  const handleBlockUser = (friendId: string) => {
+    setBlockedUsers(prev => new Set(prev).add(friendId));
+    setFriendsList(prev => prev.filter(f => f.id !== friendId));
+    setActivePM(null);
+    setNotification("User blocked.");
+  };
+
+  const handleRemoveFriend = async (friendName: string) => {
+    if (friendName.toLowerCase() === "zip bot" || friendName.toLowerCase() === "heather") {
+      setNotification("⚠️ Zip Bot and Heather are permanent default friends and cannot be removed!");
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to remove ${friendName} from your Zip Friends?`)) return;
+
+    try {
+      const updatedFriends = friendsList.filter(f => f.name.toLowerCase() !== friendName.toLowerCase() && !f.isDefault).map(f => f.name);
+      await setDoc(doc(db, "users", userName.toLowerCase()), {
+        friends: ["Zip Bot", "Heather", ...updatedFriends]
+      }, { merge: true });
+
+      setNotification(`Removed ${friendName} from Zip Friends.`);
+    } catch (err) {
+      console.error("Error removing friend:", err);
+      setNotification("Failed to remove friend.");
+    }
+  };
+
+  const handleSendFriendRequest = async () => {
+    if (!friendSearchInput.trim()) return;
+    const targetName = friendSearchInput.trim();
+    if (targetName.toLowerCase() === userName.toLowerCase()) {
+      setNotification("⚠️ You cannot add yourself as a friend!");
+      return;
+    }
+
+    try {
+      const targetRef = doc(db, "users", targetName.toLowerCase());
+      const targetSnap = await getDoc(targetRef);
+
+      if (!targetSnap.exists()) {
+        setNotification(`⚠️ User "@${targetName}" not found in cloud directory.`);
+        return;
+      }
+
+      const targetData = targetSnap.data();
+      const currentRequests: string[] = targetData.friendRequests || [];
+      if (!currentRequests.includes(userName)) {
+        currentRequests.push(userName);
+        await setDoc(targetRef, { friendRequests: currentRequests }, { merge: true });
+        setNotification(`📤 Zip Friend Request sent to ${targetData.name || targetName}!`);
+      } else {
+        setNotification(`ℹ️ Request already pending for ${targetName}.`);
+      }
+      setFriendSearchInput("");
+    } catch (err) {
+      console.error("Error sending request:", err);
+      setNotification("Failed to send friend request.");
+    }
+  };
+
+  const handleAcceptRequest = async (reqName: string) => {
+    try {
+      const userRef = doc(db, "users", userName.toLowerCase());
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) return;
+      const data = userSnap.data();
+
+      const currentFriends: string[] = data.friends || ["Zip Bot", "Heather"];
+      const currentRequests: string[] = data.friendRequests || [];
+
+      if (!currentFriends.includes(reqName)) currentFriends.push(reqName);
+      const updatedRequests = currentRequests.filter(r => r !== reqName);
+
+      await setDoc(userRef, {
+        friends: currentFriends,
+        friendRequests: updatedRequests
+      }, { merge: true });
+
+      const requesterRef = doc(db, "users", reqName.toLowerCase());
+      const reqSnap = await getDoc(requesterRef);
+      if (reqSnap.exists()) {
+        const reqData = reqSnap.data();
+        const reqFriends: string[] = reqData.friends || ["Zip Bot", "Heather"];
+        if (!reqFriends.includes(userName)) reqFriends.push(userName);
+        await setDoc(requesterRef, { friends: reqFriends }, { merge: true });
+      }
+
+      setNotification(`✅ You are now Zip Friends with ${reqName}!`);
+    } catch (err) {
+      console.error("Error accepting request:", err);
+      setNotification("Failed to accept request.");
+    }
+  };
+
+  const handleDenyRequest = async (reqName: string) => {
+    try {
+      const userRef = doc(db, "users", userName.toLowerCase());
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) return;
+      const data = userSnap.data();
+      const currentRequests: string[] = data.friendRequests || [];
+      const updatedRequests = currentRequests.filter(r => r !== reqName);
+
+      await setDoc(userRef, { friendRequests: updatedRequests }, { merge: true });
+      setNotification(`Denied friend request from ${reqName}.`);
+    } catch (err) {
+      console.error("Error denying request:", err);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        const compressed = await compressImageFile(file, 800, 800, 0.8);
+        setPreviewUploadUrl(compressed);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        const compressed = await compressImageFile(file, 400, 400, 0.82);
+        setUserAvatarUrl(compressed);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  const handleBannerFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        const compressed = await compressImageFile(file, 900, 350, 0.82);
+        setUserCardBannerUrl(compressed);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    requireAuth(async () => {
+      if (!uploadGroup || !uploadCaption.trim() || !previewUploadUrl) {
+        setNotification("⚠️ Please select a photo, group, and caption.");
+        return;
+      }
+      try {
+        await addDoc(collection(db, "gallery_photos"), {
+          groupId: "custom",
+          groupName: uploadGroup,
+          imageUrl: previewUploadUrl,
+          caption: uploadCaption.trim(),
+          uploadedBy: userName,
+          date: new Date().toLocaleDateString(),
+          timestamp: Date.now()
+        });
+        setIsUploadOpen(false);
+        setUploadCaption("");
+        setPreviewUploadUrl(null);
+        setNotification("📸 Photo uploaded to the cloud Event Gallery!");
+      } catch (err) {
+        console.error("Error uploading photo:", err);
+        setNotification("❌ Failed to upload photo to cloud.");
+      }
+    });
+  };
+
+  const handleReviewSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewText.trim()) return;
+    try {
+      await addDoc(collection(db, "reviews"), {
+        userName: userName || "Neighbor",
+        rating: reviewRating,
+        text: reviewText.trim(),
+        date: new Date().toLocaleDateString(),
+        timestamp: Date.now()
+      });
+      setIsReviewOpen(false);
+      setReviewText("");
+      setNotification("⭐ Thank you! Your review is now live in the cloud.");
+    } catch (err) {
+      console.error("Error publishing review:", err);
+    }
+  };
+
+  const handleSuggestSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const mailtoUrl = `mailto:contactzipgroups@gmail.com?subject=New%20Group%20Suggestion%20-%20${encodeURIComponent(suggestName)}&body=Group%20Name:%20${encodeURIComponent(suggestName)}%0D%0ADescription:%20${encodeURIComponent(suggestDesc)}`;
+    window.location.href = mailtoUrl;
+    setNotification(`Thanks! Your group suggestion has been sent to our team.`);
+    setSuggestName(""); setSuggestDesc(""); setIsSuggestOpen(false);
+  };
+
+  const handleReportChatSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const mailtoUrl = `mailto:contactzipgroups@gmail.com?subject=🚨%20CHAT%20REPORT%20[Severity:%20${encodeURIComponent(reportSeverity)}]&body=Names%20Involved:%20${encodeURIComponent(reportNames)}%0D%0ASeverity:%20${encodeURIComponent(reportSeverity)}%0D%0ADetails:%20${encodeURIComponent(reportDetails)}`;
+    window.location.href = mailtoUrl;
+    setNotification("🚨 Report dispatched to Administrator email queue!");
+    setIsReportChatOpen(false);
+    setReportNames(""); setReportDetails("");
+  };
+
+{/* Search Modal */}
+      {isSearchOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+          <div className="bg-[#111827] border border-cyan-500/30 rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
+            <button onClick={() => setIsSearchOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            <h3 className="text-2xl font-black text-white mb-2">Find Local Groups</h3>
+            <p className="text-sm text-gray-400 mb-6">Enter any US zip code and choose how far you want to search.</p>
+            
+            <form onSubmit={handleSearch} className="flex flex-col gap-5">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2">Zip Code</label>
+                <input type="text" maxLength={5} placeholder="e.g. 43230, 90210, 30301" value={zipCode} onChange={(e) => setZipCode(e.target.value)} required className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-xl text-white font-mono text-lg" />
+              </div>
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-cyan-400">Search Radius</label>
+                  <span className="text-sm font-bold text-cyan-300 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-800/50">{radius} {radius === 1 ? 'mile' : 'miles'}</span>
+                </div>
+                <input type="range" min={1} max={50} value={radius} onChange={(e) => setRadius(Number(e.target.value))} className="w-full accent-cyan-500 bg-gray-900 h-2 rounded-lg cursor-pointer" />
+                <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>1 mi</span><span>25 mi</span><span>50 mi</span></div>
+              </div>
+              <button type="submit" className="w-full py-4 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white cursor-pointer shadow-lg">Search Neighborhoods</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Sign Up / Log In Modal */}
+      {isAuthOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[200] p-4">
+          <div className="bg-[#111827] border border-cyan-500/40 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <button onClick={() => setIsAuthOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            <h3 className="text-2xl font-black text-white mb-2">Account Access</h3>
+            <p className="text-xs text-gray-400 mb-4">Sign in to your cloud profile or register a new neighborhood account.</p>
+
+            <div className="mb-4">
+              <div className="flex gap-2 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setIsLoginMode(false)}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    !isLoginMode ? "bg-cyan-600 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  New Account
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsLoginMode(true)}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    isLoginMode ? "bg-cyan-600 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Existing Member Log In
+                </button>
+              </div>
+
+              {isLoginMode && (
+                <div className="bg-gray-900/90 border border-cyan-500/40 rounded-2xl p-4 flex flex-col gap-3 mb-4">
+                  <p className="text-xs text-cyan-400 font-bold uppercase tracking-wider">
+                    🔑 Sign In to Your Existing Account
+                  </p>
+                  <input
+                    type="text"
+                    placeholder="Username / Handle (e.g. heather)"
+                    value={loginUsername}
+                    onChange={(e) => setLoginUsername(e.target.value)}
+                    className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-sm"
+                  />
+                  <div className="relative">
+                    <input
+                      type={showLoginPassword ? "text" : "password"}
+                      placeholder="Your Password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleExistingLogin(); }}
+                      className="w-full px-3 py-2 pr-10 bg-black border border-gray-700 rounded-xl text-white text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer"
+                      title={showLoginPassword ? "Hide Password" : "Show Password"}
+                    >
+                      {showLoginPassword ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => { setIsAuthOpen(false); setIsResetModalOpen(true); }}
+                      className="text-[11px] text-amber-400 hover:underline cursor-pointer font-bold"
+                    >
+                      Forgot / Reset Password?
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleExistingLogin}
+                    className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl cursor-pointer"
+                  >
+                    Log In Now
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {!isLoginMode && (
+              <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">First Name</label>
+                    <input type="text" placeholder="First Name" value={firstNameInput} onChange={(e) => setFirstNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Last Name</label>
+                    <input type="text" placeholder="Last Name" value={lastNameInput} onChange={(e) => setLastNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Username / Handle</label>
+                  <input type="text" placeholder="e.g. NeighborSam" value={userNameInput} onChange={(e) => setUserNameInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Date of Birth</label>
+                  <input type="date" value={dobInput} onChange={(e) => setDobInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Email Address</label>
+                  <input type="email" placeholder="you@example.com" value={emailSignupInput} onChange={(e) => setEmailSignupInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Phone Number</label>
+                  <input type="tel" placeholder="(614) 555-0192" value={phoneInput} onChange={(e) => setPhoneInput(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">Password (Min 8 Characters)</label>
+                    <button type="button" onClick={() => { setIsAuthOpen(false); setIsResetModalOpen(true); }} className="text-[10px] text-amber-400 hover:underline cursor-pointer font-bold">Forgot Password?</button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showSignupPassword ? "text" : "password"}
+                      minLength={8}
+                      placeholder="At least 8 characters"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 pr-10 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupPassword(!showSignupPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer"
+                      title={showSignupPassword ? "Hide Password" : "Show Password"}
+                    >
+                      {showSignupPassword ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 mt-1">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} id="rememberMeBox" className="accent-cyan-500 rounded cursor-pointer" />
+                    <label htmlFor="rememberMeBox" className="text-xs text-gray-300 cursor-pointer">Remember me on this device</label>
+                  </div>
+
+                  <label className="flex items-start gap-2 cursor-pointer bg-black/40 p-2.5 rounded-xl border border-gray-800">
+                    <input
+                      type="checkbox"
+                      checked={signupAgreedTerms}
+                      onChange={(e) => setSignupAgreedTerms(e.target.checked)}
+                      required
+                      className="mt-0.5 accent-cyan-500 rounded cursor-pointer shrink-0"
+                    />
+                    <span className="text-[11px] text-gray-300 leading-snug">
+                      I agree to the{" "}
+                      <span onClick={(e) => { e.preventDefault(); setActiveLegalModal("terms"); }} className="text-cyan-400 underline hover:text-cyan-300">Terms of Use</span>,{" "}
+                      <span onClick={(e) => { e.preventDefault(); setActiveLegalModal("privacy"); }} className="text-cyan-400 underline hover:text-cyan-300">Privacy Policy</span>, and{" "}
+                      <span onClick={(e) => { e.preventDefault(); setActiveLegalModal("guidelines"); }} className="text-emerald-400 underline hover:text-emerald-300">Safety Guidelines</span>.
+                    </span>
+                  </label>
+                </div>
+
+                <button type="submit" className="mt-3 w-full py-3.5 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg cursor-pointer text-xs uppercase tracking-wider hover:opacity-90">Create Cloud Account</button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* GALLERY UPLOAD MODAL */}
+      {isUploadOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[200] p-4">
+          <div className="bg-[#111827] border border-pink-500/40 rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
+            <button onClick={() => setIsUploadOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            <h3 className="text-2xl font-black text-white mb-1">Upload to Gallery</h3>
+            <p className="text-[11px] text-gray-400 mb-6">Share moments from your recent gatherings with the community.</p>
+            
+            <form onSubmit={handleUploadSubmit} className="flex flex-col gap-4">
+              <input type="file" ref={fileInputRef} accept="image/*" onChange={handleFileChange} className="hidden" />
+              
+              <div 
+                onClick={() => fileInputRef.current?.click()} 
+                className="w-full h-36 rounded-xl border-2 border-dashed border-gray-700 hover:border-pink-500 flex flex-col items-center justify-center bg-gray-900/50 cursor-pointer transition-colors relative overflow-hidden"
+              >
+                {previewUploadUrl ? (
+                  <img src={previewUploadUrl} alt="Upload Preview" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="text-center p-4">
+                    <span className="text-3xl mb-1 inline-block">📥</span>
+                    <p className="text-xs text-pink-400 font-bold">Click to select photo from your device</p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-pink-400 mb-1">Select Group</label>
+                <select value={uploadGroup} onChange={(e) => setUploadGroup(e.target.value)} required className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-pink-500">
+                  <option value="" disabled>Choose a group category...</option>
+                  {uniqueGroupNames.map(name => (<option key={name} value={name}>{name}</option>))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-pink-400 mb-1">Caption</label>
+                <input type="text" placeholder="e.g. Amazing turnout at the park today!" value={uploadCaption} onChange={(e) => setUploadCaption(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-pink-500" />
+              </div>
+              <button type="submit" className="mt-2 w-full py-3 rounded-xl font-bold bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-lg cursor-pointer text-xs uppercase tracking-wider hover:opacity-90">Publish to Cloud Gallery</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Partner Application Modal */}
+      {isPartnerModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[200] p-4 overflow-y-auto">
+          <div className="bg-[#111827] border border-amber-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative my-6 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <button onClick={() => setIsPartnerModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            <h3 className="text-xl font-black text-amber-400 mb-1">Partner Venue Application ($35/mo)</h3>
+            <p className="text-xs text-gray-300 mb-4 leading-relaxed">Fill your slow weeknights with weekly neighborhood groups.</p>
+            
+            <form onSubmit={handlePartnerSubmit} className="flex flex-col gap-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Business Name</label>
+                <input type="text" placeholder="e.g. Nostalgia Lounge" value={partnerBusinessName} onChange={(e) => setPartnerBusinessName(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Business Address</label>
+                <input type="text" placeholder="e.g. 102 Mill St, Gahanna, OH" value={partnerAddress} onChange={(e) => setPartnerAddress(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Phone Number</label>
+                  <input type="text" placeholder="e.g. 614-555-0192" value={partnerPhone} onChange={(e) => setPartnerPhone(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Email Address</label>
+                  <input type="email" placeholder="manager@venue.com" value={partnerEmail} onChange={(e) => setPartnerEmail(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Hours of Operation</label>
+                <input type="text" placeholder="e.g. Tue-Sun: 4PM - 11PM" value={partnerHours} onChange={(e) => setPartnerHours(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Proposed Member Perk (Optional)</label>
+                <input type="text" placeholder="e.g. 15% off wine flights for Zip Groups" value={partnerPerk} onChange={(e) => setPartnerPerk(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Menu Link or Highlights (Optional)</label>
+                <input type="text" placeholder="e.g. Craft cocktails & artisan flatbreads" value={partnerMenu} onChange={(e) => setPartnerMenu(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+              </div>
+
+              <div className="flex flex-col gap-2 mt-3">
+                <button type="submit" className="w-full py-3.5 rounded-xl font-bold bg-[#ffc439] hover:bg-[#f2ba31] text-[#003087] shadow-lg cursor-pointer text-xs transition-opacity flex items-center justify-center gap-2">
+                  Pay $35/mo with PayPal & Submit Application
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* FULL LEGAL, PRIVACY, TERMS & GUIDELINES MODAL */}
+      {activeLegalModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[295] p-4">
+          <div className="bg-[#111827] border border-cyan-500/40 rounded-3xl p-6 md:p-8 max-w-2xl w-full shadow-2xl relative max-h-[85vh] overflow-y-auto custom-scrollbar text-left">
+            <button onClick={() => setActiveLegalModal(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            
+            {activeLegalModal === "terms" && (
+              <>
+                <h3 className="text-2xl font-black text-white mb-2">Terms & Conditions of Use</h3>
+                <p className="text-xs text-cyan-400 mb-4">Effective Date: {new Date().getFullYear()} &bull; Zip Groups Inc. (myzipgroups.com)</p>
+                <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
+                  <p><strong>1. Acceptance of Terms:</strong> By accessing or using Zip Groups, creating an account, joining a neighborhood circle, or attending any gathering posted on the platform, you agree to be bound by these Terms & Conditions.</p>
+                  <p><strong>2. Age & Eligibility Requirements:</strong> Users must be at least 13 years of age. Users ages 13–17 are restricted to designated Teen categories and may not RSVP to or attend 18+ restricted gatherings. Misrepresenting your age or date of birth is grounds for immediate account termination.</p>
+                  <p><strong>3. Assumption of Risk & Offline Meetups:</strong> Zip Groups is solely a digital directory and communication facilitator. Zip Groups does not vet, background-check, or supervise individual members, hosts, or offline gatherings. You assume 100% of the personal, physical, and financial risk associated with meeting people offline or attending any venue or residence.</p>
+                  <p><strong>4. Host Subscriptions & Merchandise:</strong> Host Memberships ($15/month following a 30-day trial) and Venue Partnerships ($35/month) are billed via PayPal and may be canceled at any time. Physical Host Welcome Kits are unlocked free after 3 consecutive monthly host subscription payments or may be purchased directly in the Zip Shop.</p>
+                  <p><strong>5. Account Termination:</strong> We reserve the right to suspend or permanently remove any account that violates our zero-tolerance policies against harassment, threats, doxxing, spam, or illegal conduct.</p>
+                </div>
+              </>
+            )}
+
+            {activeLegalModal === "privacy" && (
+              <>
+                <h3 className="text-2xl font-black text-white mb-2">Privacy Policy</h3>
+                <p className="text-xs text-cyan-400 mb-4">How Zip Groups Protects Your Neighborhood Data</p>
+                <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
+                  <p><strong>1. Information We Collect:</strong> We collect the profile information you voluntarily provide (username, name, date of birth for age-tier verification, email address, phone number, optional profile selfie, optional Discord link, and optional emergency contact details).</p>
+                  <p><strong>2. Public vs. Private Control:</strong> Your email address and phone number are hidden from your Zip Friend card by default and are only displayed if you explicitly check &ldquo;Make Public on Card&rdquo; in Account Settings.</p>
+                  <p><strong>3. Emergency GPS & Safety Data:</strong> Live GPS coordinates are only requested when you actively trigger the 911 Emergency Assist broadcast or when an active Safety Check-In timer expires without confirmation, and are transmitted solely to your designated emergency contact.</p>
+                  <p><strong>4. Right to Deletion:</strong> You may permanently delete your cloud account and release your username at any time using the &ldquo;Delete Account Permanently&rdquo; button inside Account Settings.</p>
+                </div>
+              </>
+            )}
+
+            {activeLegalModal === "guidelines" && (
+              <>
+                <h3 className="text-2xl font-black text-white mb-2">Community & Safety Guidelines</h3>
+                <p className="text-xs text-emerald-400 mb-4">Building Safe, Welcoming Local Circles</p>
+                <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
+                  <p><strong>1. Meet in Public Spaces First:</strong> Always hold initial gatherings in well-lit public locations such as verified local partner cafes, parks, libraries, or restaurants. We strongly recommend a minimum of 4 confirmed RSVPs for every gathering.</p>
+                  <p><strong>2. Use the Built-In Safety Suite:</strong> Before heading to a meetup, configure your Safety Emergency Contact in Account Settings and toggle on <strong>🛡️ Safety Mode</strong> so a trusted contact is automatically notified if you do not check in.</p>
+                  <p><strong>3. Zero Tolerance for Harassment or Hate:</strong> Hate speech, racial slurs, bullying, stalking, unwanted solicitation, crypto/financial scams, and explicit content are strictly prohibited in group chats, direct messages, and photo uploads.</p>
+                  <p><strong>4. Respectful Selfies & Media:</strong> Profile selfies and Event Gallery uploads must be family-friendly and respectful (no weapons, nudity, or explicit imagery).</p>
+                </div>
+              </>
+            )}
+
+            {activeLegalModal === "disclaimer" && (
+              <>
+                <h3 className="text-2xl font-black text-amber-400 mb-2">⚠️ Legal Liability Disclaimer & 911 Notice</h3>
+                <p className="text-xs text-gray-400 mb-4">Important Legal Notice for All Zip Groups Users</p>
+                <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
+                  <p><strong>1. Release of Liability:</strong> To the maximum extent permitted by law, Zip Groups Inc., its founders, creators, and affiliates shall not be liable for any injury, loss, claim, property damage, or incident arising out of or connected with any online interaction, carpool arrangement, or offline meetup organized through the platform.</p>
+                  <p><strong>2. Safety Tools Are Supplemental:</strong> The Safety Check-In Timer and 911 Assist GPS Broadcast features rely on browser permissions, cellular carrier email-to-SMS gateways, and internet connectivity. They are supplemental convenience tools and <strong>do not replace calling 911 directly</strong> in a life-threatening emergency.</p>
+                  <p><strong>3. Third-Party Links & Venues:</strong> External links (including user-submitted Discord servers, profiles, and local partner venues) are operated by third parties outside of Zip Groups&apos; control.</p>
+                </div>
+              </>
+            )}
+
+            <button onClick={() => setActiveLegalModal(null)} className="mt-6 w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs uppercase rounded-xl cursor-pointer">
+              Close Window
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Universal Legal Footer */}
+      <footer className="w-full max-w-6xl text-center py-10 mt-16 border-t border-gray-800/60 text-xs text-gray-500 z-10 flex flex-col gap-4">
+        <div className="flex justify-center flex-wrap gap-6 font-medium">
+          <span onClick={() => setIsSuggestOpen(true)} className="hover:text-cyan-400 cursor-pointer transition-colors text-cyan-300 font-bold">+ Suggest Group</span>
+          <a href="mailto:contactzipgroups@gmail.com" className="hover:text-cyan-400 cursor-pointer transition-colors text-cyan-300 font-bold">Contact Us</a>
+          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setActiveLegalModal("terms")}>Terms & Conditions</span>
+          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setActiveLegalModal("privacy")}>Privacy Policy</span>
+          <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setActiveLegalModal("guidelines")}>Community Guidelines</span>
+          <span className="hover:text-amber-400 cursor-pointer transition-colors text-amber-400/90" onClick={() => setActiveLegalModal("disclaimer")}>Liability & Safety Disclaimer</span>
+        </div>
+        <p className="max-w-3xl mx-auto leading-relaxed text-[10px] text-gray-400">
+          ⚠️ <strong className="text-gray-300">Official Platform Disclaimer:</strong> Zip Groups is a digital platform connecting local neighbors and does not conduct criminal background checks or supervise offline events. We are not liable for offline interactions, carpools, incidents, or disputes. Always exercise caution, meet in well-lit public areas (4+ attendees recommended), and dial 911 directly in an emergency. Zero tolerance for hate speech, harassment, or scams.
+        </p>
+        <button onClick={() => setIsReviewOpen(true)} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold rounded-xl border border-gray-700 transition-all cursor-pointer w-fit mx-auto mt-2">
+          Leave a Review
+        </button>
+        <p>&copy; {new Date().getFullYear()} Zip Groups Inc. &bull; Building Local Communities Nationwide.</p>
+      </footer>
+    </main>
+  );
+}

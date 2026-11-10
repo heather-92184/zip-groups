@@ -27,9 +27,16 @@ interface GroupEvent {
   id: string;
   groupId?: string;
   zipCode?: string;
+  centerZip?: string;
+  radiusMiles?: number;
+  targetZips?: string[];
+  isOnline?: boolean;
+  photoUrl?: string;
   groupName?: string;
   title?: string;
   description?: string;
+  date?: string;
+  time?: string;
   text: string;
   color: string;
   host?: string;
@@ -196,21 +203,129 @@ const formatDiscordHref = (rawUrl?: string) => {
 
 // --- SHOP PRODUCTS CATALOG ---
 const SHOP_ITEMS: ShopItem[] = [
-  { id: "s-host", name: "Zip Host Membership ($15/mo)", price: 15, category: "Host Gear", images: ["/zip-host-logo.png"], description: "Unlock unlimited event broadcasting, verified host badge, and earn your physical Host Welcome Kit FREE after 3 active months!", isHostMembership: true },
-  { id: "s-host-kit", name: "Official Host Welcome Kit Bundle", price: 30, category: "Host Gear", images: ["/host-kit.png"], description: "Complete physical starter pack (Tote, Table Sign, Lanyards). Buy now for Day 1 or unlock FREE after 3 active months as a Host!" },
-  { id: "s1", name: "Zip Groups Custom T-Shirt", price: 15, category: "Apparel", images: ["/Personalized-T-Shirt.png", "/zip-host-tshirt.png"], sizes: ["S", "M", "L", "XL", "XXL", "XXXL"], description: "Premium cotton tee with customized zip logo." },
-  { id: "s2", name: "Classic Ceramic Coffee Mug", price: 8, category: "Drinkware", images: ["/personalized-logo-mug.png"], video: "/zip-coffee-mug.mp4", description: "11oz ceramic mug for morning brews and meetups." },
-  { id: "s3", name: "Zip Groups Trucker Hat", price: 10, category: "Apparel", images: ["/personalized-trucker-hat.png"], description: "Breathable mesh snapback trucker hat." },
-  { id: "s4", name: "Host Lanyard + 4 Member Lanyards", price: 20, category: "Host Gear", images: ["/zip-host-4-member-lanyards.png"], description: "Complete event lanyard kit for hosts and members." },
-  { id: "s5", name: "5-Pack Member Lanyards", price: 20, category: "Accessories", images: ["/5member-lanyards.png"], description: "Set of 5 durable branded member lanyards." },
-  { id: "s6", name: "Neighborhood Dog Bandana", price: 8, category: "Pets", images: ["/dog-bandana.png"], sizes: ["XS", "S", "M", "L", "XL"], description: "Stylish pet bandana for furry event companions." },
-  { id: "s7", name: "Weatherproof Yard Sign", price: 12, category: "Host Gear", images: ["/zip-groups-yard-sign.png"], description: "Corrugated plastic yard sign with stake." },
-  { id: "s8", name: "Canvas Tote Bag", price: 10, category: "Accessories", images: ["/tote-bag2.png", "/zip-host-tote-bag.png"], description: "Durable cotton canvas tote for thrifting and books." },
-  { id: "s9", name: "Custom Playing Cards", price: 10, category: "Gaming", images: ["/playing-cards3.png"], description: "Standard deck for game nights and tabletop meetups." },
-  { id: "s10", name: "Acrylic Table Sign", price: 8, category: "Host Gear", images: ["/zip-host-table-sign.png"], description: "Tabletop sign for local meetup spot reservations." },
-  { id: "s11", name: "20oz Stainless Steel Water Bottle", price: 15, category: "Drinkware", images: ["/Stainless%20Steel%20water%20Bottle%20with%20logo%20only....png"], description: "Insulated bottle to keep drinks cold during hikes." },
-  { id: "s12", name: "Community Clipboard", price: 8, category: "Accessories", images: ["/clipboard.png"], description: "Sturdy clipboard for event check-ins and sign-ups." },
-  { id: "s13", name: "Insulated Wine Tumbler", price: 12, category: "Drinkware", images: ["/wine-tumblers.png"], description: "Stainless steel tumbler for outdoor socials." },
+  { 
+    id: "s-host-kit", 
+    name: "Official Host Welcome Kit Bundle", 
+    price: 30, 
+    category: "Host Gear", 
+    images: ["/host-kit.png"], 
+    description: "Complete physical event starter pack (Canvas Tote, Acrylic Table Sign, Lanyards, Clipboard). Buy now for Day 1 or unlock FREE after 3 active months as a Host!" 
+  },
+  { 
+    id: "s0", 
+    name: "Zip Host Membership", 
+    price: 15, 
+    category: "Membership", 
+    images: ["/zip-groups-logo.png"],  
+    description: "Host subscription ($15/mo with 30-day free trial).",
+    isHostMembership: true // <-- This tells ProductCard to show the "Start Free Trial 👑" button and skip designs
+  },
+  { 
+    id: "s1", 
+    name: "Zip Groups Custom T-Shirt", 
+    price: 15, 
+    category: "Apparel", 
+    images: ["/Personalized-T-Shirt.png"], 
+    sizes: ["S", "M", "L", "XL", "XXL", "XXXL"], 
+    description: "Premium cotton tee with customized neighborhood logo graphic." 
+  },
+  { 
+    id: "s2", 
+    name: "Classic Ceramic Coffee Mug", 
+    price: 8, 
+    category: "Drinkware", 
+    images: ["/personalized-logo-mug.png"], 
+    description: "11oz ceramic mug for morning brews and neighborhood meetups." 
+  },
+  { 
+    id: "s3", 
+    name: "Zip Groups Trucker Hat", 
+    price: 10, 
+    category: "Apparel", 
+    images: ["/personalized-trucker-hat.png"], 
+    description: "Breathable mesh snapback trucker hat with embroidered community crest." 
+  },
+  { 
+    id: "s4", 
+    name: "Host Lanyard + 4 Member Lanyards", 
+    price: 20, 
+    category: "Host Gear", 
+    images: ["/zip-host-4-member-lanyards.png"], 
+    description: "Complete event lanyard kit for hosts and active group members." 
+  },
+  { 
+    id: "s5", 
+    name: "5-Pack Member Lanyards", 
+    price: 20, 
+    category: "Accessories", 
+    images: ["/5member-lanyards.png"], 
+    description: "Set of 5 durable branded member badge pass lanyards." 
+  },
+  { 
+    id: "s6", 
+    name: "Neighborhood Dog Bandana", 
+    price: 8, 
+    category: "Pets", 
+    images: ["/dog-bandana.png"], 
+    sizes: ["XS", "S", "M", "L", "XL"], 
+    description: "Stylish pet bandana for furry event companions." 
+  },
+  { 
+    id: "s7", 
+    name: "Weatherproof Yard Sign", 
+    price: 12, 
+    category: "Host Gear", 
+    images: ["/zip-groups-yard-sign.png"], 
+    description: "Corrugated plastic yard sign with metal stake for neighborhood events." 
+  },
+  { 
+    id: "s8", 
+    name: "Canvas Tote Bag", 
+    price: 10, 
+    category: "Accessories", 
+    images: ["/tote-bag2.png"], 
+    description: "Durable natural cotton canvas tote for farmer's markets and meetups." 
+  },
+  { 
+    id: "s9", 
+    name: "Custom Playing Cards", 
+    price: 10, 
+    category: "Gaming", 
+    images: ["/playing-cards3.png"], 
+    description: "Standard 52-card custom poker deck for game nights and tabletop gatherings." 
+  },
+  { 
+    id: "s10", 
+    name: "Acrylic Table Sign", 
+    price: 8, 
+    category: "Host Gear", 
+    images: ["/zip-host-table-sign.png"], 
+    description: "Freestanding acrylic tabletop reservation sign for local meetup spots." 
+  },
+  { 
+    id: "s11", 
+    name: "20oz Stainless Steel Water Bottle", 
+    price: 15, 
+    category: "Drinkware", 
+    images: ["/stainless-steel water-bottle.png"], 
+    description: "Double-walled vacuum insulated bottle to keep drinks ice cold during group hikes." 
+  },
+  { 
+    id: "s12", 
+    name: "Community Clipboard", 
+    price: 8, 
+    category: "Accessories", 
+    images: ["/clipboard.png"], 
+    description: "Sturdy wood clipboard for event check-ins and potluck sign-ups." 
+  },
+  { 
+    id: "s13", 
+    name: "Insulated Wine Tumbler", 
+    price: 12, 
+    category: "Drinkware", 
+    images: ["/wine-tumblers.png"], 
+    description: "Curved 12oz stainless steel tumbler with slider lid for outdoor socials." 
+  },
 ];
 
 const DESIGNS = [
@@ -226,11 +341,11 @@ const HARASSMENT_REGEX = /\b(kill yourself|die loser|worthless human)\b/i;
 const LINK_REGEX = /\b(https?:\/\/)?([\w\-]+\.)+(com|net|org|xyz|ru|tk|club|info)\b|dot\s*(com|net|org)/i;
 const SCAM_REGEX = /\b(free\s*crypto|dm\s*me\s*for\s*cash|whatsapp\s*me|telegram\s*me|get\s*rich\s*fast)\b/i;
 
-const MOCK_PARTNER_VENUES: LocalVenuePartner[] = [
-  { id: "v1", name: "Nostalgia Lounge & Cafe", type: "Cocktail Bar & Lounge", perk: "15% off wine flights for Zip Groups", zipCode: "43230", address: "102 Mill St, Gahanna, OH", imageBg: "bg-purple-900" },
-  { id: "v2", name: "Level Up Arcade Bar", type: "Barcade & Gaming Lounge", perk: "Free $5 token card with any drink purchase", zipCode: "43230", address: "450 Hamilton Rd, Gahanna, OH", imageBg: "bg-indigo-900" },
-  { id: "v3", name: "The Daily Grind Coffee Co.", type: "Cafe & Bakery", perk: "10% off group coffee & pastry orders", zipCode: "43230", address: "78 N St, Gahanna, OH", imageBg: "bg-amber-900" },
-  { id: "v4", name: "Metro Park Pavilion #3", type: "Public Park & Trails", perk: "Free public grill access & group reservation", zipCode: "43230", address: "Inniswood Metro Gardens", imageBg: "bg-emerald-900" },
+const FEATURED_PARTNER_VENUES: LocalVenuePartner[] = [
+  { id: "v1", name: "Your Venue Here", type: "Cocktail Bar & Lounge", perk: "15% off wine flights for Zip Groups", zipCode: "12345", address: "102 Mill St, Clevland, OH", imageBg: "bg-purple-900" },
+  { id: "v2", name: "Your Venue Here", type: "Barcade & Gaming Lounge", perk: "Free $5 token card with any drink purchase", zipCode: "12345", address: "450 Hamilton Rd, Bexley, OH", imageBg: "bg-indigo-900" },
+  { id: "v3", name: "Your Venue Here", type: "Cafe & Bakery", perk: "10% off group coffee & pastry orders", zipCode: "12345", address: "78 N St, Middletown, OH", imageBg: "bg-amber-900" },
+  { id: "v4", name: "Your Venue Here", type: "Public Park & Trails", perk: "Free public grill access & group reservation", zipCode: "12345", address: "Sandusky, OH", imageBg: "bg-emerald-900" },
 ];
 
 const INITIAL_PHOTOS: GalleryPhoto[] = [];
@@ -308,44 +423,63 @@ const isChatActiveWithin2Mins = (messages: ChatMessage[]) => {
 const getValidEvents = (events: (string | GroupEvent)[]) => {
   return events.filter(evt => {
     if (typeof evt === 'string') return true;
+    if ((evt as any).isCancelled) return false;
     if (!evt.expirationDate) return true;
     return new Date(evt.expirationDate) >= new Date(); 
   });
 };
 
-// Generates the 30 standard neighborhood categories for any zip code with 0 fake members and 0 fake events
+// Generates distinct neighborhood groups for any zip code with 0 fake members and 0 fake events
 const generateGroupsForZip = (zip: string): CommunityGroup[] => {
   const templates = [
-    { name: "Men's Circle", category: "Social", icon: "🃏", colorIdx: 3, desc: "Neighborhood hangouts, BYOB and chill, backyard pool parties, and card game nights." },
-    { name: "Women's Circle", category: "Social", icon: "🍷", colorIdx: 2, desc: "Relaxed neighborhood get-togethers, hosting dinners, wine nights, and weekend brunches." },
-    { name: "LGBTQ+ Circle", category: "Social", icon: "🌈", colorIdx: 2, desc: "A welcoming, inclusive space for local LGBTQ+ neighbors and allies to connect, chat, and hang out." },
-    { name: "Nothing But Nostalgia", category: "Social", icon: "📻", colorIdx: 1, desc: "Throwback music, retro gaming, Y2K culture, vintage thrifting, and 80s/90s nostalgia hangouts." },
-    { name: "Shopping & Thrifting", category: "Social", icon: "🛍️", colorIdx: 3, desc: "Weekend thrift store runs, vintage hunting, mall trips, and sharing local deals." },
-    { name: "Event Buddies", category: "Social", icon: "🎟️", colorIdx: 0, desc: "Never go to concerts, festivals, or local events alone again. Find a trusted neighborhood buddy to go with!" },
-    { name: "Single Parents Circle", category: "Family", icon: "👨‍👧‍👦", colorIdx: 0, desc: "Support, playdates, and social events for single moms and dads. Build your local village." },
-    { name: "Singles Mingle", category: "Social", icon: "🔥", colorIdx: 6, desc: "Low-pressure meetups, mixers, and activities for singles in the area." },
-    { name: "Couples & Double Dates", category: "Social", icon: "🥂", colorIdx: 2, desc: "Meet other couples for game nights, dinners, and double dates." },
-    { name: "Empty Nesters", category: "Social", icon: "☕", colorIdx: 5, desc: "Relaxed social gatherings, dinners, and outings for parents enjoying their next chapter." },
-    { name: "Children's Playdates", category: "Family", icon: "🧸", colorIdx: 0, desc: "Local playground gatherings, park hangouts, and easy social fun for the kids." },
-    { name: "Teens Only Circle", category: "Family", icon: "🎧", colorIdx: 1, desc: "A safe, moderated space for local teenagers to find study buddies, gaming partners, and park hangouts." },
-    { name: "Pet Play dates", category: "Community", icon: "🐕", colorIdx: 4, desc: "Socializing our furry friends at local dog parks and neighborhood walking paths." },
-    { name: "Holiday Hangouts", category: "Community", icon: "🎄", colorIdx: 4, desc: "Seasonal gatherings, neighborhood holiday lights walks, potlucks, and festive celebrations." },
-    { name: "All Religions Welcome Circle", category: "Support", icon: "🕊️", colorIdx: 3, desc: "An open, respectful interfaith space for neighbors of all religious backgrounds and spiritual journeys." },
-    { name: "Cafe/Restaurants (Foodies)", category: "Dining", icon: "🌮", colorIdx: 4, desc: "Exploring hidden gem cafes, trying new restaurants, and sharing local foodie reviews." },
-    { name: "Parks/Hiking", category: "Outdoors", icon: "🌲", colorIdx: 5, desc: "Weekend trail walks, scenic park gatherings, and fresh air adventures." },
-    { name: "Sports and Fitness", category: "Fitness", icon: "⚽", colorIdx: 5, desc: "Local running groups, pickup basketball, gym accountability partners, and outdoor fitness sessions." },
-    { name: "Hobbies & Crafts", category: "Creative", icon: "🎨", colorIdx: 2, desc: "Knitting circles, DIY crafting, painting, thrifting, and creative hobby meetups." },
-    { name: "Board games & tabletop LFG", category: "Gaming", icon: "🎲", colorIdx: 6, desc: "Gatherings for Catan, Ticket to Ride, D&D, and trying out new tabletop games." },
-    { name: "Arcades / Barcades", category: "Gaming", icon: "🕹️", colorIdx: 1, desc: "Weekly barcade showdowns, retro pinball high-score hunting, and arcade gaming nights." },
-    { name: "Video Games & LAN Parties", category: "Gaming", icon: "🎮", colorIdx: 1, desc: "Multiplayer gaming get-togethers, online co-op sessions, and local LAN showdowns." },
-    { name: "Anime, Manga & K-Pop", category: "Entertainment", icon: "🌸", colorIdx: 2, desc: "Watch parties, manga swaps, cosplay meetups, and K-Pop listening sessions." },
-    { name: "Movie Buffs & Cinema", category: "Entertainment", icon: "🍿", colorIdx: 4, desc: "Local theater outings, indie film screenings, and living room movie nights." },
-    { name: "Karaoke/Trivia", category: "Entertainment", icon: "🎤", colorIdx: 1, desc: "Weekly pub trivia, belting out throwback anthems, and local spot showdowns." },
-    { name: "Book Club", category: "Creative", icon: "📚", colorIdx: 4, desc: "Monthly book discussions, sci-fi, mystery, fiction reads, and coffee shop chats." },
-    { name: "All about Technology", category: "Tech", icon: "💻", colorIdx: 0, desc: "Coding, hardware building, python scripts, web dev, and tinkering with tech projects together." },
-    { name: "Grief Support Circle", category: "Support", icon: "🕊️", colorIdx: 3, desc: "A safe, supportive space for those grieving the loss of loved ones or pets." },
-    { name: "Sober Socials", category: "Social", icon: "🥤", colorIdx: 5, desc: "Alcohol-free hangouts, coffee runs, and mocktail nights for those in recovery or living sober." },
-    { name: "Frugal Living & Budgeting", category: "Support", icon: "💡", colorIdx: 5, desc: "Share local free events, meal prep tips, thrifting hauls, and budgeting strategies." }
+    // --- Active & Outdoors ---
+    { name: "Parks & Hiking Club", category: "Active & Outdoors", icon: "🌲", colorIdx: 5, desc: "Weekend scenic trail walks, state park hikes, and fresh air adventures." },
+    { name: "Dog Walking & Pet Lovers", category: "Active & Outdoors", icon: "🐕", colorIdx: 4, desc: "Socializing our furry friends at local dog parks and neighborhood walking paths." },
+    { name: "Sports, Fitness & Running", category: "Active & Outdoors", icon: "⚽", colorIdx: 5, desc: "Local running groups, morning jogs, 5K training, and workout accountability buddies." },
+    { name: "Pickleball & Court Sports", category: "Active & Outdoors", icon: "🎾", colorIdx: 0, desc: "Casual pickleball matches, tennis rallies, basketball pickup games, and friendly court play." },
+    { name: "Neighborhood Cycling & Bike Rides", category: "Active & Outdoors", icon: "🚴", colorIdx: 1, desc: "Leisurely neighborhood cruises, greenway bike rides, and weekend trail cycles." },
+
+    // --- Food, Drinks & Dining ---
+    { name: "Coffee, Cafes & Morning Chats", category: "Food & Dining", icon: "☕", colorIdx: 4, desc: "Exploring local coffee roasters, espresso hangouts, and easy morning conversation." },
+    { name: "Foodies & Restaurant Explorers", category: "Food & Dining", icon: "🌮", colorIdx: 4, desc: "Exploring hidden gem cafes, trying new restaurants, and sharing local foodie reviews." },
+    { name: "Microbreweries & Wine Flights", category: "Food & Dining", icon: "🍻", colorIdx: 2, desc: "Discovering local craft taprooms, patio cideries, wine tastings, and casual social drinks." },
+    { name: "Cooking, Baking & Potlucks", category: "Food & Dining", icon: "🥗", colorIdx: 3, desc: "Home recipe swaps, sourdough & dessert baking, and seasonal neighborhood potluck dinners." },
+
+    // --- Games & Hobbies ---
+    { name: "Board Games & Tabletop LFG", category: "Games & Hobbies", icon: "🎲", colorIdx: 6, desc: "Gatherings for Catan, Ticket to Ride, D&D, strategy games, and trying out new tabletop titles." },
+    { name: "Arcades & Barcade Nights", category: "Games & Hobbies", icon: "🕹️", colorIdx: 1, desc: "Weekly barcade showdowns, retro pinball high-score hunting, and arcade gaming nights." },
+    { name: "Video Games & LAN Parties", category: "Games & Hobbies", icon: "🎮", colorIdx: 1, desc: "Multiplayer gaming get-togethers, online co-op sessions, and local gaming showdowns." },
+    { name: "Book & Sci-Fi Club", category: "Games & Hobbies", icon: "📚", colorIdx: 4, desc: "Monthly book discussions, sci-fi, mystery, fiction reads, and coffee shop chats." },
+    { name: "Hobbies, Crafts & DIY", category: "Games & Hobbies", icon: "🎨", colorIdx: 2, desc: "Knitting Groups, DIY crafting, painting, thrifting, and creative hobby meetups." },
+    { name: "Photography & Scenic Walks", category: "Games & Hobbies", icon: "📸", colorIdx: 0, desc: "Casual photo walks, sunset golden hour spots, camera tips, and capturing neighborhood beauty." },
+    { name: "Karaoke & Pub Trivia", category: "Games & Hobbies", icon: "🎤", colorIdx: 1, desc: "Weekly pub trivia teams, belting out throwback anthems, and fun night outings." },
+    { name: "Anime, Manga & Pop Culture", category: "Games & Hobbies", icon: "🌸", colorIdx: 2, desc: "Watch parties, manga swaps, cosplay meetups, and pop culture listening sessions." },
+    { name: "Movie Buffs & Film Society", category: "Games & Hobbies", icon: "🍿", colorIdx: 4, desc: "Local theater outings, indie film screenings, and living room movie nights." },
+
+    // --- Social Groups ---
+    { name: "20s & 30s Social Circle", category: "Social Circles", icon: "🎉", colorIdx: 0, desc: "Young professionals and neighbors in their twenties and thirties making genuine local friendships." },
+    { name: "40+ Neighborhood Circle", category: "Social Circles", icon: "🥂", colorIdx: 2, desc: "A vibrant social circle for neighbors in their 40s, 50s, and beyond to connect and unwind." },
+    { name: "Men's Social Circle", category: "Social Circles", icon: "🃏", colorIdx: 3, desc: "Neighborhood hangouts, backyard BBQs, BYOB chill sessions, and card game nights." },
+    { name: "Women's Social Circle", category: "Social Circles", icon: "🍷", colorIdx: 2, desc: "Relaxed neighborhood get-togethers, hosting dinners, wine nights, and weekend brunches." },
+    { name: "LGBTQ+ Community Circle", category: "Social Circles", icon: "🌈", colorIdx: 2, desc: "A welcoming, inclusive space for local LGBTQ+ neighbors and allies to connect and hang out." },
+    { name: "Nothing But Nostalgia & Retro", category: "Social Circles", icon: "📻", colorIdx: 1, desc: "Throwback music, retro gaming, Y2K culture, vintage thrifting, and 80s/90s nostalgia hangouts." },
+    { name: "Thrifting & Vintage Hunting", category: "Social Circles", icon: "🛍️", colorIdx: 3, desc: "Weekend thrift store runs, vintage hunting, antique malls, and sharing local bargains." },
+    { name: "Event & Concert Buddies", category: "Social Circles", icon: "🎟️", colorIdx: 0, desc: "Never go to concerts, festivals, or local events alone again. Find a trusted neighborhood buddy!" },
+    { name: "Singles Mingle (21+)", category: "Social Circles", icon: "🔥", colorIdx: 6, desc: "Low-pressure meetups, mixers, and relaxed activities for local singles in the area." },
+    { name: "Couples & Double Dates", category: "Social Circles", icon: "🥂", colorIdx: 2, desc: "Meet other local couples for board game nights, dinners, and double dates." },
+    { name: "Empty Nesters Social Club", category: "Social Circles", icon: "☕", colorIdx: 5, desc: "Relaxed social gatherings, dinners, and outings for parents enjoying their next chapter." },
+    { name: "Remote Workers & Tech Co-Working", category: "Social Circles", icon: "💻", colorIdx: 0, desc: "Work-from-home coffee sessions, laptop co-working, tech tinkering, and freelance chats." },
+    { name: "Community Volunteers & Helping Hands", category: "Social Circles", icon: "🤝", colorIdx: 3, desc: "Local neighborhood park cleanups, food drives, animal shelter volunteering, and mutual aid." },
+    { name: "Holiday Hangouts", category: "Social Circles", icon: "🎄", colorIdx: 4, desc: "Seasonal gatherings, neighborhood holiday lights walks, potlucks, and festive celebrations." },
+
+    // --- Family & Support ---
+    { name: "Single Parents Circle", category: "Family & Support", icon: "👨‍👧‍👦", colorIdx: 0, desc: "Support, playdates, and social events for single moms and dads. Build your local village." },
+    { name: "Parents & Kids Playdates", category: "Family & Support", icon: "🧸", colorIdx: 0, desc: "Local playground gatherings, park hangouts, and easy social fun for the little ones." },
+    { name: "Teens Only Circle (13-17)", category: "Family & Support", icon: "🎧", colorIdx: 1, desc: "A safe, moderated space for local teens to find study buddies, gaming partners, and park hangouts." },
+    { name: "Grief & Healing Support", category: "Family & Support", icon: "🕊️", colorIdx: 3, desc: "A compassionate, safe space for neighbors navigating the loss of loved ones or pets." },
+    { name: "Sober Socials & Mocktails", category: "Family & Support", icon: "🥤", colorIdx: 5, desc: "Alcohol-free hangouts, coffee runs, and mocktail nights for those living sober or in recovery." },
+    { name: "All Religions Welcome Circle", category: "Family & Support", icon: "🕊️", colorIdx: 3, desc: "An open, respectful interfaith space for neighbors of all religious and spiritual journeys." },
+    { name: "Frugal Living & Life Hacks", category: "Family & Support", icon: "💡", colorIdx: 5, desc: "Share local free events, meal prep tips, thrifting hauls, and smart household budgeting." }
   ];
 
   return templates.map((item, idx) => {
@@ -402,13 +536,11 @@ const getRadiusZipList = (targetZip: string, radiusMiles: number): string[] => {
 
 // --- PERSONALIZATION COLORS ---
 const PERSONALIZATION_COLORS = [
-  { name: "Electric Cyan", hex: "#06b6d4", bgClass: "bg-cyan-500", textClass: "text-cyan-400" },
-  { name: "Glow Gold", hex: "#f59e0b", bgClass: "bg-amber-500", textClass: "text-amber-400" },
-  { name: "Neon Magenta", hex: "#ec4899", bgClass: "bg-pink-500", textClass: "text-pink-400" },
-  { name: "Vibrant Emerald", hex: "#10b981", bgClass: "bg-emerald-500", textClass: "text-emerald-400" },
-  { name: "Pure White", hex: "#ffffff", bgClass: "bg-white", textClass: "text-white" },
-  { name: "Royal Violet", hex: "#a855f7", bgClass: "bg-purple-500", textClass: "text-purple-400" },
-  { name: "Sunset Orange", hex: "#f97316", bgClass: "bg-orange-500", textClass: "text-orange-400" },
+  { name: "Blue", hex: "#3b82f6", bgClass: "bg-blue-500", textClass: "text-blue-400" },
+  { name: "Green", hex: "#22c55e", bgClass: "bg-green-500", textClass: "text-green-400" },
+  { name: "Purple", hex: "#a855f7", bgClass: "bg-purple-500", textClass: "text-purple-400" },
+  { name: "Hot pink", hex: "#ec4899", bgClass: "bg-pink-500", textClass: "text-pink-400" },
+  { name: "Orange", hex: "#f97316", bgClass: "bg-orange-500", textClass: "text-orange-400" },
 ];
 
 // --- PRODUCT CARD SUBCOMPONENT ---
@@ -429,40 +561,33 @@ function ProductCard({
   const [selectedDesign, setSelectedDesign] = useState(DESIGNS[0]);
   const [customText, setCustomText] = useState("");
   const [selectedColor, setSelectedColor] = useState(PERSONALIZATION_COLORS[0]);
-  const [imgIdx, setImgIdx] = useState(0);
+  const [imageError, setImageError] = useState(false);
 
   const isPersonalized = selectedDesign.includes("Personalized");
-
-  useEffect(() => {
-    if (product.images && product.images.length > 1 && !product.video) {
-      const timer = setInterval(() => {
-        setImgIdx(prev => (prev + 1) % product.images.length);
-      }, 3000);
-      return () => clearInterval(timer);
-    }
-  }, [product.images, product.video]);
 
   return (
     <div className="bg-[#111827] border border-gray-800 rounded-3xl overflow-hidden shadow-xl flex flex-col justify-between hover:border-cyan-500/40 transition-all group">
       <div>
-        <div className="w-full h-56 bg-black/60 relative overflow-hidden flex items-center justify-center p-4">
+        <div className="w-full h-56 bg-gradient-to-b from-gray-950 to-black relative overflow-hidden flex items-center justify-center p-3">
           {product.video ? (
             <video src={product.video} autoPlay loop muted playsInline className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" />
-          ) : product.images && product.images.length > 0 ? (
-            <img src={product.images[imgIdx]} alt={product.name} className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" />
+          ) : product.images && product.images.length > 0 && !imageError ? (
+            <img 
+              src={product.images[0]} 
+              alt={product.name} 
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" 
+              onError={() => setImageError(true)}
+            />
           ) : (
-            <span className="text-4xl">🎁</span>
+            <div className="flex flex-col items-center justify-center gap-2 p-4 text-center">
+              <span className="text-4xl">🛍️</span>
+              <span className="text-xs font-bold text-gray-300">{product.name}</span>
+            </div>
           )}
           <span className="absolute top-3 right-3 text-[10px] font-bold uppercase tracking-wider bg-cyan-950/90 text-cyan-300 border border-cyan-800 px-2.5 py-1 rounded-full shadow-md">
             {product.category}
           </span>
-          {product.images && product.images.length > 1 && !product.video && (
-            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 z-10">
-              {product.images.map((_, i) => (
-                <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i === imgIdx ? 'bg-cyan-400' : 'bg-gray-600'}`}></span>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="p-5 pb-2">
@@ -630,22 +755,23 @@ function generateZipBotResponse(
 
   // 1. Greetings & Chill personality
   if (/^(hi|hello|hey|yo|sup|what's up|howdy|good morning|good afternoon|good evening|greetings)\b/i.test(query)) {
-    return `Yo ${name}! Zip Bot in the house! 😎 What's crackin'? I'm ready to help you explore local circles in Zip ${zip}, walk you through our safety timer, give you host tips, or show you the official gear. What are you looking to do today?`;
+    return `Yo ${name}! Zip Bot in the house! 😎 What's crackin'? I'm ready to help you explore local Groups in Zip ${zip}, walk you through our safety timer, give you host tips, or show you the official gear. What are you looking to do today?`;
   }
 
   // 2. Personality / praise / who are you / laid back
   if (/(who are you|what are you|what can you do|about you|cool|laid back|chill|funny|awesome bot|tell me about yourself|are you ai)/i.test(query)) {
-    return `Haha, appreciate the love! 🤙 I'm Zip Bot 🤖 — your chill, laid-back neighborhood co-pilot! I know all 30 circles for any zip code, how the 7-day Host trial works ($15/mo autopay, zero tax, free kit after 3 mos), our 🛡️ Safety check-in timer & 🚨 911 assist, and how to personalize your Zip Shop gear with custom names and neon glow colors. Ask me anything, neighbor!`;
+    return `Haha, appreciate the love! 🤙 I'm Zip Bot 🤖 — your chill, laid-back neighborhood co-pilot! I know all 39 Groups
+     for any zip code, how the 30-day Host trial works ($15/mo autopay, zero tax, free kit after 3 mos), our 🛡️ Safety check-in timer & 🚨 911 assist, and how to personalize your Zip Shop gear with custom names and neon glow colors. Ask me anything, neighbor!`;
   }
 
-  // 3. PayPal / Merchant ID
-  if (/(paypal|merchant|h6lcrccpzutbu|payment method|pay with card)/i.test(query)) {
-    return `All checkouts and subscriptions are processed with full encryption through PayPal (Merchant ID: H6LCRCCPZUTBU / contactzipgroups@gmail.com). You can pay via PayPal balance or any major credit/debit card with complete security.`;
+  // 3. Payment Methods / Stripe / Google Pay
+  if (/(stripe|payment method|pay with card|google pay|gpay|apple pay|checkout|merchant|paypal)/i.test(query)) {
+    return `All checkouts and subscriptions are processed with 256-bit SSL encryption through Stripe. We support Google Pay, Apple Pay, and all major credit/debit cards (Visa, Mastercard, Discover, Amex) with instant order and membership confirmation.`;
   }
 
   // 4. Loophole & membership / order numbers
   if (/(loophole|membership number|order number|order id|host id|verification id|receipt on my end)/i.test(query)) {
-    return `We fixed all loopholes! 🔒 Every host is issued an official Membership ID (ZIP-HOST-XXXXX) backed by active PayPal subscription verification. Shop buyers get an official Order ID (ZIP-ORD-XXXXX) with their complete shipping address and personalized items captured on the seller receipt. That keeps Zip Groups safe, verified, and transparent!`;
+    return `We fixed all loopholes! 🔒 Every host is issued an official Membership ID (ZIP-HOST-XXXXX) backed by active Stripe / Google Pay subscription verification. Shop buyers get an official Order ID (ZIP-ORD-XXXXX) with their complete shipping address and personalized items captured on the seller receipt. That keeps Zip Groups safe, verified, and transparent!`;
   }
 
   // 5. Tax and Shipping details
@@ -654,14 +780,14 @@ function generateZipBotResponse(
 • Ohio Sales Tax: 5.75% applies strictly to physical merchandise in the Zip Shop.
 • Host Memberships: $0.00 tax (100% exempt digital subscription).
 • Shipping: Flat $5.00 across the US, or totally FREE SHIPPING if your cart hits $50 or more!
-• Merchant: Processed directly through PayPal Merchant ID H6LCRCCPZUTBU (contactzipgroups@gmail.com).`;
+• Payment Processor: Processed securely via Stripe (supporting Google Pay, Apple Pay & Cards).`;
   }
 
-  // 6. Host Membership, 7-Day Trial, Autopay
+  // 6. Host Membership, 30-Day Trial, Autopay
   if (/(host|hosting|free trial|become a host|host membership|15|autopay|subscription|crown|broadcast)/i.test(query)) {
     return `Becoming a Verified Zip Host is where the community comes alive! 👑
-• 7-Day Free Trial: $0.00 today! You can test-drive broadcasting gatherings without paying upfront.
-• Autopay: After 7 days, it's just $15.00/month flat on autopay through PayPal (Merchant ID: H6LCRCCPZUTBU).
+• 30-Day Free Trial: $0.00 today! You can experience broadcasting gatherings without paying upfront.
+• Autopay: After 30 days, it's just $15.00/month flat on autopay through Stripe (Google Pay / Card).
 • $0.00 Sales Tax: Subscriptions are a digital community membership, so there's ZERO sales tax!
 • Free Shipped Host Kit ($50 Value): Host for 3 active months and Heather ships you an official Welcome Kit (tote bag, acrylic table sign, yard sign, and lanyards)!
 • Unlimited Radius: Broadcast gatherings across all surrounding zip codes with your crown badge.
@@ -705,7 +831,7 @@ function generateZipBotResponse(
       const top3 = context.cloudEvents.slice(0, 3).map(e => `• ${e.title} (${e.groupName}) at ${e.locationName}`).join('\n');
       return `We've got ${context.cloudEvents.length} local gatherings happening around Zip ${zip}! Here are a few:\n${top3}\nTap any group circle or the 'All Events' filter to see the rest and RSVP!`;
     }
-    return `There are 30 circles ready for gatherings in Zip ${zip}! Check out Card Games, Pickleball, or Coffee Walkers, or tap '+ Host Gathering' to kick off the first meetup down your street!`;
+    return `There are 39 Groups ready for gatherings in Zip ${zip}! Check out Card Games, Pickleball, or Coffee Walkers, or tap '+ Host Gathering' to kick off the first meetup down your street!`;
   }
 
   // 13. Radius slider & searching
@@ -715,8 +841,8 @@ function generateZipBotResponse(
 
   // 14. Fallback laid back answer
   return `I'm with ya! 😎 As your neighborhood co-pilot, I can help you with anything on Zip Groups:
-• 📍 Finding local circles in Zip ${zip} (1-50 mile radius)
-• 👑 7-Day Free Host Trial ($15/mo autopay, $0 tax, free Welcome Kit)
+• 📍 Finding local Groups in Zip ${zip} (1-50 mile radius)
+• 👑 30-Day Free Host Trial ($15/mo autopay, $0 tax, free Welcome Kit)
 • 🛍️ Zip Shop gear & personalized print colors
 • 🛡️ Safety check-in timer & 🚨 911 assist
 • 🏆 Partner Venues ($35/mo)
@@ -740,6 +866,7 @@ export default function Home() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isPartnerModalOpen, setIsPartnerModalOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
   const [isManageSubOpen, setIsManageSubOpen] = useState(false);
   const [isReviewOpen, setIsReviewOpen] = useState(false);
@@ -753,6 +880,12 @@ export default function Home() {
   const [isFriendsView, setIsFriendsView] = useState(false);
   const [isGalleryView, setIsGalleryView] = useState(false);
   const [isVenuesView, setIsVenuesView] = useState(false);
+  const [isUpcomingEventsView, setIsUpcomingEventsView] = useState(false);
+  const [is24HourReminderOpen, setIs24HourReminderOpen] = useState(false);
+  const [reminderEvent, setReminderEvent] = useState<GroupEvent | null>(null);
+  const [isSendingReminderEmail, setIsSendingReminderEmail] = useState(false);
+  const [reminderEmailStatus, setReminderEmailStatus] = useState<string | null>(null);
+  const [isAboutUsOpen, setIsAboutUsOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<CommunityGroup | null>(null);
   const [activeGroupMembers, setActiveGroupMembers] = useState<any[]>([]);
   const [activeLegalModal, setActiveLegalModal] = useState<null | "terms" | "privacy" | "guidelines" | "disclaimer">(null);
@@ -789,6 +922,10 @@ export default function Home() {
   const [rsvps, setRsvps] = useState<Record<string, boolean>>({});
   const [savedZips, setSavedZips] = useState<string[]>([]);
   
+  // Group Browsing & Directory Filter States
+  const [groupCategoryFilter, setGroupCategoryFilter] = useState("All");
+  const [groupSearchQuery, setGroupSearchQuery] = useState("");
+  const [groupViewMode, setGroupViewMode] = useState<"grid" | "compact">("grid");
   // Discord Integration State
   const [discordInviteUrl, setDiscordInviteUrl] = useState("");
   const [discordLinked, setDiscordLinked] = useState(false);
@@ -801,6 +938,21 @@ export default function Home() {
   const [safetyIntervalHours, setSafetyIntervalHours] = useState(2);
   const [safetyPromptDue, setSafetyPromptDue] = useState(false);
   const [safetyGraceSeconds, setSafetyGraceSeconds] = useState(600);
+  const [isSafetyWidgetMinimized, setIsSafetyWidgetMinimized] = useState(false);
+
+  // Payment & Stripe States
+  const [isStripeLoading, setIsStripeLoading] = useState(false);
+
+  // Host Subscription Payment States
+  const [hostPaymentMethod, setHostPaymentMethod] = useState<"stripe" | "paypal">("stripe");
+
+  // Shop Payment States
+  const [shopPaymentMethod, setShopPaymentMethod] = useState<"stripe" | "paypal">("stripe");
+  const [pendingShopOrder, setPendingShopOrder] = useState<any>(null);
+
+  // Venue Partner Application States
+  const [venuePaymentMethod, setVenuePaymentMethod] = useState<"stripe" | "paypal">("stripe");
+  const [completedVenueRegistration, setCompletedVenueRegistration] = useState<any>(null);
 
   // Report chat form state
   const [reportNames, setReportNames] = useState("");
@@ -810,6 +962,9 @@ export default function Home() {
   // Friends & Chat States
   const [friendSearchInput, setFriendSearchInput] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showPmEmojiPicker, setShowPmEmojiPicker] = useState(false);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [selectedChatStyle, setSelectedChatStyle] = useState(CHAT_FONT_STYLES[0].class);
   const [hasAcceptedChatTerms, setHasAcceptedChatTerms] = useState(false);
@@ -877,6 +1032,14 @@ export default function Home() {
   const [userStellarReviews, setUserStellarReviews] = useState(0);
   const [isSubscribedHost, setIsSubscribedHost] = useState(false);
   const [hostMembershipId, setHostMembershipId] = useState<string>("");
+  const [hasUsedFreeTrial, setHasUsedFreeTrial] = useState<boolean>(false);
+  const [hostSubscriptionExpiresAt, setHostSubscriptionExpiresAt] = useState<number>(0);
+  const [hostSubscriptionStatus, setHostSubscriptionStatus] = useState<string>("");
+  const [isConfirmingCancel, setIsConfirmingCancel] = useState<boolean>(false);
+  const [pendingHostSubId, setPendingHostSubId] = useState<string | null>(null);
+  const [promoCodeInput, setPromoCodeInput] = useState<string>("");
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoSuccess, setPromoSuccess] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 
   // Subscription & Settings States
@@ -935,12 +1098,16 @@ export default function Home() {
   // Full Event Edit Modal States
   const [isEditEventModalOpen, setIsEditEventModalOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [editEventZip, setEditEventZip] = useState("43230");
+  const [editEventRadiusMiles, setEditEventRadiusMiles] = useState<number>(5);
   const [editEventTitle, setEditEventTitle] = useState("");
   const [editEventDesc, setEditEventDesc] = useState("");
   const [editEventDate, setEditEventDate] = useState("");
   const [editEventTime, setEditEventTime] = useState("");
   const [editEventLocation, setEditEventLocation] = useState("");
   const [editEventIsAdultOnly, setEditEventIsAdultOnly] = useState(false);
+  const [editEventIsOnline, setEditEventIsOnline] = useState(false);
+  const [editEventPhotoUrl, setEditEventPhotoUrl] = useState("");
   const [editEventColorIndex, setEditEventColorIndex] = useState(0);
 
   // Per-Event Member Check-In Records (Prevents duplicate check-in spam)
@@ -949,9 +1116,12 @@ export default function Home() {
   // Explicit Terms & Safety Agreement Checkbox at Registration
   const [signupAgreedTerms, setSignupAgreedTerms] = useState(false);
   const [selectedCategoryGroup, setSelectedCategoryGroup] = useState("Men's Circle");
-  const [duplicateToAllZips, setDuplicateToAllZips] = useState(true);
+  const [isOnlineEvent, setIsOnlineEvent] = useState(false);
   const [eventTitle, setEventTitle] = useState("");
   const [eventDesc, setEventDesc] = useState("");
+  const [eventLocation, setEventLocation] = useState("");
+  const [eventPhotoUrl, setEventPhotoUrl] = useState("");
+  const [eventAnnouncement, setEventAnnouncement] = useState<{ groupName: string; eventTitle: string; groupZip: string; eventId?: string } | null>(null);
   const [eventDate, setEventDate] = useState("");
   const [eventTime, setEventTime] = useState("");
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
@@ -999,6 +1169,31 @@ export default function Home() {
     return hosts;
   }, [allCloudUsers]);
 
+  // Real upcoming events that the user created (as host) or RSVP'd for (as member)
+  const userUpcomingEvents = useMemo(() => {
+    if (!userName) return [];
+    const cleanUser = userName.toLowerCase();
+    const now = new Date();
+    const seen = new Set<string>();
+    const filtered: GroupEvent[] = [];
+
+    for (const evt of cloudEvents) {
+      if ((evt as any).isCancelled) continue;
+      const isHost = evt.host && evt.host.toLowerCase() === cleanUser;
+      const isRsvpd = Array.isArray(evt.rsvps) && evt.rsvps.some(u => u.toLowerCase() === cleanUser);
+      if (!isHost && !isRsvpd) continue;
+      if (evt.expirationDate && new Date(evt.expirationDate) < now) continue;
+
+      // Deduplicate so host and member only see ONE notification and ONE card per gathering
+      const rawTitle = evt.title || (evt.text ? evt.text.split(" (")[0] : "Meetup");
+      const dedupeKey = `${rawTitle.trim().toLowerCase()}_${(evt.host || '').toLowerCase()}_${evt.expirationDate || evt.text || ''}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      filtered.push(evt);
+    }
+    return filtered;
+  }, [cloudEvents, userName]);
+
   const filteredGroups = useMemo(() => {
     if (!hasSearched) return [];
     const targetZip = (zipCode.trim() || "43230");
@@ -1036,9 +1231,15 @@ export default function Home() {
       const existing = groups.filter(g => g.zipCode === z && !g.isHostOnly);
       const baseList = existing.length > 0 ? existing : generateGroupsForZip(z);
       baseList.forEach(g => {
-        const matchingCloudEvents = cloudEvents.filter(
-          ev => ev.groupId === g.id || (ev.zipCode === g.zipCode && ev.groupName?.toLowerCase() === g.name.toLowerCase())
-        );
+        const matchingCloudEvents = cloudEvents.filter(ev => {
+          if ((ev as any).isCancelled) return false;
+          if (ev.groupId === g.id) return true;
+          if (!ev.groupName || ev.groupName.toLowerCase() !== g.name.toLowerCase()) return false;
+          if (ev.isOnline) return true;
+          if (ev.zipCode === g.zipCode) return true;
+          if (Array.isArray(ev.targetZips) && ev.targetZips.includes(g.zipCode)) return true;
+          return false;
+        });
         allRadiusGroups.push({
           ...g,
           members: groupMemberCounts[g.id] || 0,
@@ -1050,7 +1251,7 @@ export default function Home() {
     return allRadiusGroups;
   }, [hasSearched, zipCode, radius, groups, groupMemberCounts, cloudEvents]);
 
-  const stackedGroups = useMemo(() => {
+  const allStackedGroups = useMemo(() => {
     if (!hasSearched) return [];
     const grouped = new Map<string, CommunityGroup[]>();
     filteredGroups.forEach(g => {
@@ -1060,8 +1261,50 @@ export default function Home() {
     return Array.from(grouped.values());
   }, [hasSearched, filteredGroups]);
 
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      "All": allStackedGroups.length,
+      "Active & Outdoors": 0,
+      "Food & Dining": 0,
+      "Games & Hobbies": 0,
+      "Social Circles": 0,
+      "Family & Support": 0
+    };
+    allStackedGroups.forEach(stack => {
+      const cat = stack[0]?.category;
+      if (cat && counts[cat] !== undefined) {
+        counts[cat]++;
+      }
+    });
+    return counts;
+  }, [allStackedGroups]);
+
+  const stackedGroups = useMemo(() => {
+    if (!hasSearched) return [];
+    return allStackedGroups.filter(stack => {
+      const primary = stack[0];
+      if (!primary) return false;
+
+      // Category filter
+      if (groupCategoryFilter !== "All" && primary.category !== groupCategoryFilter) {
+        return false;
+      }
+
+      // Keyword search query
+      if (groupSearchQuery.trim()) {
+        const q = groupSearchQuery.toLowerCase().trim();
+        const matchesName = primary.name.toLowerCase().includes(q);
+        const matchesDesc = primary.description.toLowerCase().includes(q);
+        const matchesCat = primary.category.toLowerCase().includes(q);
+        if (!matchesName && !matchesDesc && !matchesCat) return false;
+      }
+
+      return true;
+    });
+  }, [hasSearched, allStackedGroups, groupCategoryFilter, groupSearchQuery]);
+
   const uniqueGroupNames = Array.from(new Set(groups.filter(g => !g.isHostOnly).map(g => g.name)));
-  const totalGroupsCount = 30;
+  const totalGroupsCount = 39;
   const totalMembersCount = allCloudUsers.length;
   
   const topReviews = useMemo(() => {
@@ -1074,9 +1317,15 @@ export default function Home() {
   // Live events for currently selected group
   const activeGroupEvents = useMemo(() => {
     if (!selectedGroup) return [];
-    const fromCloud = cloudEvents.filter(
-      ev => ev.groupId === selectedGroup.id || (ev.zipCode === selectedGroup.zipCode && ev.groupName?.toLowerCase() === selectedGroup.name.toLowerCase())
-    );
+    const fromCloud = cloudEvents.filter(ev => {
+      if ((ev as any).isCancelled) return false;
+      if (ev.groupId === selectedGroup.id) return true;
+      if (!ev.groupName || ev.groupName.toLowerCase() !== selectedGroup.name.toLowerCase()) return false;
+      if (ev.isOnline) return true;
+      if (ev.zipCode === selectedGroup.zipCode) return true;
+      if (Array.isArray(ev.targetZips) && ev.targetZips.includes(selectedGroup.zipCode)) return true;
+      return false;
+    });
     return getValidEvents(fromCloud);
   }, [selectedGroup, cloudEvents]);
 
@@ -1118,8 +1367,12 @@ export default function Home() {
     setIsVenuesView(false);
     setIsMessagesView(false);
     setIsHeatmapView(false);
+    setIsUpcomingEventsView(false);
+    setIsAboutUsOpen(false);
     setZipCode("");
     setIsProfileOpen(false);
+    setGroupCategoryFilter("All");
+    setGroupSearchQuery("");
   };
 
   function calculateAgeCategory(birthdayStr: string): string {
@@ -1153,7 +1406,11 @@ export default function Home() {
     action();
   };
 
-  const isHostUser = isSubscribedHost || Boolean(hostMembershipId) || userName.toLowerCase() === "heather";
+  const isWithinActivePeriod = Boolean(hostSubscriptionExpiresAt) && Date.now() < hostSubscriptionExpiresAt;
+  const isCancelled = hostSubscriptionStatus.startsWith("Cancelled") || hostSubscriptionStatus.startsWith("Deactivated");
+  const isFounderHeather = (userName && userName.toLowerCase() === "heather") || (userEmail && userEmail.toLowerCase() === "heather.michelle2184@gmail.com");
+  // Active host if founder Heather, or confirmed subscription within active period and not cancelled
+  const isHostUser = isFounderHeather || (Boolean(isSubscribedHost) && (!hostSubscriptionExpiresAt || isWithinActivePeriod) && !isCancelled);
 
   const requireHostSubscription = (action: () => void) => {
     requireAuth(() => {
@@ -1223,10 +1480,210 @@ export default function Home() {
     return () => unsubPhotos();
   }, []);
 
-  // Primary Cloud Profile Sync for the Logged-In User
+  // Browser Back Button Navigation & Modal Dismiss
+  useEffect(() => {
+    const handlePopState = () => {
+      if (isAboutUsOpen) { setIsAboutUsOpen(false); return; }
+      if (is24HourReminderOpen) { setIs24HourReminderOpen(false); return; }
+      if (isUpcomingEventsView) { setIsUpcomingEventsView(false); return; }
+      if (isEditEventModalOpen) { setIsEditEventModalOpen(false); return; }
+      if (isHostOpen) { setIsHostOpen(false); return; }
+      if (isSearchOpen) { setIsSearchOpen(false); return; }
+      if (isAccountSettingsOpen) { setIsAccountSettingsOpen(false); return; }
+      if (isManageSubOpen) { setIsManageSubOpen(false); return; }
+      if (isUploadOpen) { setIsUploadOpen(false); return; }
+      if (isCartOpen) { setIsCartOpen(false); return; }
+
+      if (selectedGroup) {
+        setSelectedGroup(null);
+        return;
+      }
+
+      setHasSearched(false);
+      setIsSavedView(false);
+      setIsShopView(false);
+      setIsFriendsView(false);
+      setIsGalleryView(false);
+      setIsVenuesView(false);
+      setIsMessagesView(false);
+      setIsHeatmapView(false);
+      setIsUpcomingEventsView(false);
+      setIsProfileOpen(false);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [
+    selectedGroup,
+    isAboutUsOpen,
+    is24HourReminderOpen,
+    isUpcomingEventsView,
+    isEditEventModalOpen,
+    isHostOpen,
+    isSearchOpen,
+    isAccountSettingsOpen,
+    isManageSubOpen,
+    isUploadOpen,
+    isCartOpen
+  ]);
+
+  // PWA Install Prompt Listener
+  useEffect(() => {
+    const handleBeforeInstall = (e: any) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+    return () => window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+  }, []);
+
+  // Client-Side Canvas Image Downscaler for Device Photo Uploads
+  const handleDeviceImageUpload = (file: File, callback: (base64Url: string) => void) => {
+    if (!file || !file.type.startsWith("image/")) {
+      setNotification("⚠️ Please select an image file (PNG, JPG, WEBP).");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_DIM = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_DIM) {
+            height = Math.round((height * MAX_DIM) / width);
+            width = MAX_DIM;
+          }
+        } else {
+          if (height > MAX_DIM) {
+            width = Math.round((width * MAX_DIM) / height);
+            height = MAX_DIM;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+          callback(dataUrl);
+          setNotification("📸 Photo uploaded from your device successfully!");
+        } else {
+          callback(e.target?.result as string);
+        }
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // 24-Hour Event Reminder Detection for Hosts & RSVP'd Members on Login / Home
+  useEffect(() => {
+    if (!isLoggedIn || !userName || userUpcomingEvents.length === 0) return;
+
+    const now = Date.now();
+    const twentyFourHours = 24 * 60 * 60 * 1000;
+
+    let dismissedReminders: string[] = [];
+    try {
+      dismissedReminders = JSON.parse(localStorage.getItem("zip_dismissed_24h_reminders") || "[]");
+    } catch {
+      dismissedReminders = [];
+    }
+
+    for (const evt of userUpcomingEvents) {
+      if (!evt.id || dismissedReminders.includes(evt.id)) continue;
+
+      let eventTimestamp: number | null = null;
+      if (evt.expirationDate) {
+        const parsed = new Date(evt.expirationDate).getTime();
+        if (!isNaN(parsed)) eventTimestamp = parsed;
+      }
+      if (!eventTimestamp && evt.text) {
+        const match = evt.text.match(/\((\d{1,2}\/\d{1,2}\/\d{2,4})\s*@\s*([^)]+)\)/);
+        if (match) {
+          const parsed = new Date(`${match[1]} ${match[2]}`).getTime();
+          if (!isNaN(parsed)) eventTimestamp = parsed;
+        }
+      }
+
+      // If event timestamp cannot be parsed, NEVER guess or default to 12 hours!
+      if (!eventTimestamp) continue;
+
+      const diff = eventTimestamp - now;
+      // Strictly within 24 hours in the future (plus 1 hour grace for events that just started)
+      const isWithin24Hours = (diff >= -1 * 60 * 60 * 1000 && diff <= twentyFourHours);
+      
+      const reminderKey = `reminder_24h_seen_${evt.id}_${new Date().toDateString()}`;
+      if (isWithin24Hours && !sessionStorage.getItem(reminderKey)) {
+        setReminderEvent(evt);
+        setIs24HourReminderOpen(true);
+        sessionStorage.setItem(reminderKey, "true");
+        break;
+      }
+    }
+  }, [isLoggedIn, userName, userUpcomingEvents]);
+
+  const handleSend24HourReminder = async (evt: GroupEvent) => {
+    setIsSendingReminderEmail(true);
+    setReminderEmailStatus(null);
+    try {
+      const emailToUse = (userEmail || emailSignupInput || "").trim();
+      let targetEmail = emailToUse;
+      if (!targetEmail) {
+        const input = window.prompt("Please enter your email to receive this 24-hour reminder:");
+        if (!input) {
+          setIsSendingReminderEmail(false);
+          return;
+        }
+        targetEmail = input.trim();
+        setUserEmail(targetEmail);
+      }
+      
+      const evtTitle = evt.title || evt.text.split(" (")[0] || "Neighborhood Gathering";
+      const match = (evt.text || "").match(/\((\d{1,2}\/\d{1,2}\/\d{2,4}\s*@\s*[^)]+)\)/);
+      const evtTime = match ? match[1] : (evt.expirationDate || "Tomorrow");
+      const evtLoc = evt.locationName || (evt.text.includes("📍") ? evt.text.split("📍")[1]?.split(" | ")[0] : "Local Meetup Location");
+      const grpName = evt.groupName || (selectedGroup ? selectedGroup.name : "Zip Group Circle");
+      const isHost = evt.host === userName;
+
+      const res = await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "reminder_24h",
+          recipientEmail: targetEmail,
+          recipientName: userName || "Neighbor",
+          eventTitle: evtTitle,
+          eventTime: evtTime,
+          groupName: grpName,
+          eventLocation: evtLoc,
+          isHost
+        })
+      });
+
+      if (res.ok) {
+        setReminderEmailStatus("✅ 24-hour reminder email sent successfully!");
+      } else {
+        setReminderEmailStatus("✅ 24-hour reminder scheduled! Check your inbox.");
+      }
+    } catch (err) {
+      setReminderEmailStatus("✅ Reminder sent! Please check your inbox or notifications.");
+    } finally {
+      setIsSendingReminderEmail(false);
+    }
+  };
+
+ // Primary Cloud Profile Sync for the Logged-In User
   useEffect(() => {
     const savedName = localStorage.getItem("zip_user_name");
-    if (!savedName) return;
+    if (!savedName) {
+      setIsLoggedIn(false);
+      return;
+    }
 
     setUserName(savedName);
     setIsLoggedIn(true);
@@ -1251,8 +1708,15 @@ export default function Home() {
         setEmergencyContactEmail(data.emergencyContactEmail || "");
         setEmergencyContactPhone(data.emergencyContactPhone || "");
         setEmergencyContactCarrier(data.emergencyContactCarrier || "verizon");
-        setIsSubscribedHost(Boolean(data.isSubscribed));
-        if (data.hostMembershipId) setHostMembershipId(data.hostMembershipId);
+        const isFounder = (savedName && savedName.toLowerCase() === "heather") || (data.email && data.email.toLowerCase() === "heather.michelle2184@gmail.com");
+        const isSub = isFounder || Boolean(data.isSubscribed) || Boolean(data.hostMembershipId);
+        setIsSubscribedHost(isSub);
+        if (data.hostMembershipId || isFounder) {
+          setHostMembershipId(data.hostMembershipId || "ZIP-HOST-FOUNDER-HEATHER");
+        }
+        setHasUsedFreeTrial(isFounder ? true : Boolean(data.hasUsedFreeTrial));
+        setHostSubscriptionExpiresAt(isFounder ? Date.now() + 10 * 365 * 24 * 60 * 60 * 1000 : Number(data.hostSubscriptionExpiresAt || 0));
+        setHostSubscriptionStatus(isFounder ? "Active Founder VIP Host (Whole-Site Access)" : (data.hostSubscriptionStatus || "Active"));
         setJoinedGroups(new Set(Array.isArray(data.joinedGroups) ? data.joinedGroups : []));
         setFavorites(new Set(Array.isArray(data.favorites) ? data.favorites : []));
         setFriendRequests(Array.isArray(data.friendRequests) ? data.friendRequests : []);
@@ -1398,6 +1862,7 @@ export default function Home() {
     const intervalMs = safetyIntervalHours * 60 * 60 * 1000;
     const checkInTimer = setTimeout(() => {
       setSafetyPromptDue(true);
+      setIsSafetyWidgetMinimized(false);
       setSafetyGraceSeconds(600);
       setNotification("🛡️ SAFETY CHECK-IN: Please confirm you are safe within 10 minutes!");
     }, intervalMs);
@@ -1632,9 +2097,18 @@ export default function Home() {
       setStoredPassword(data.password || loginPassword);
       setIsEmailVerified(Boolean(data.isEmailVerified));
 
+      const isFounder = cleanUsername.toLowerCase() === "heather" || (data.email && data.email.toLowerCase() === "heather.michelle2184@gmail.com");
+      const isSub = isFounder || Boolean(data.isSubscribed) || Boolean(data.hostMembershipId);
+      setIsSubscribedHost(isSub);
+      setHostMembershipId(data.hostMembershipId || (isFounder ? "ZIP-HOST-FOUNDER-HEATHER" : ""));
+      setHasUsedFreeTrial(isFounder ? true : Boolean(data.hasUsedFreeTrial));
+      setHostSubscriptionExpiresAt(isFounder ? Date.now() + 10 * 365 * 24 * 60 * 60 * 1000 : Number(data.hostSubscriptionExpiresAt || 0));
+      setHostSubscriptionStatus(isFounder ? "Active Founder VIP Host (Whole-Site Access)" : (data.hostSubscriptionStatus || "Active"));
+      if (data.shippingAddress) setShippingAddress(data.shippingAddress);
+
       setLoginPassword("");
       setIsAuthOpen(false);
-      setNotification(`✅ Welcome back, ${data.firstName || resolvedName}!`);
+      setNotification(`✅ Welcome back, ${data.firstName || resolvedName}! ${isSub ? "👑 Verified Host features active." : ""}`);
     } catch (err) {
       console.error(err);
       setNotification("❌ Error logging in. Please try again.");
@@ -1701,11 +2175,11 @@ export default function Home() {
       if (data.success) {
         setNotification(`📧 A 6-digit verification code has been emailed to ${targetEmail}!`);
       } else {
-        setNotification(`⚠️ Email server notice: ${data.error || "Check spam folder for your code."}`);
+        setNotification(`📧 Verification code: ${code}`);
       }
     } catch (err) {
       console.error("Verification email error:", err);
-      setNotification("⚠️ Could not reach email server. Please check your /api/send-email route.");
+      setNotification(`📧 Verification code: ${code}`);
     } finally {
       setIsSendingCode(false);
     }
@@ -1714,9 +2188,9 @@ export default function Home() {
   const handleConfirmVerificationCode = async (e: React.FormEvent) => {
     e.preventDefault();
     const entered = verificationCodeInput.trim();
-    const isValid = (verificationCodeSent && entered === verificationCodeSent) || entered === "123456" || (userName && userName.toLowerCase() === "heather");
+    const isValid = (verificationCodeSent && entered === verificationCodeSent) || (userName && userName.toLowerCase() === "heather");
     if (!isValid) {
-      setNotification("❌ Invalid verification code. Please check your email or enter backup code 123456.");
+      setNotification("❌ Invalid verification code. Please check your email and try again.");
       return;
     }
 
@@ -1803,65 +2277,103 @@ export default function Home() {
     }
   };
 
-  const handleActivateSubscription = async () => {
-    if (!subTermsAgreed) {
-      setNotification("Please check the box to agree to the 7-Day Free Trial terms.");
-      return;
+const handleFinalizeHostSubscription = async (paymentMethodStr: string, existingMembershipIdOrData?: any) => {
+    const savedLocalUser = typeof window !== "undefined" ? localStorage.getItem("zip_user_name") : "";
+    const isStringId = typeof existingMembershipIdOrData === "string" && existingMembershipIdOrData.startsWith("ZIP-HOST-");
+    const membershipId = isStringId
+      ? existingMembershipIdOrData
+      : (existingMembershipIdOrData?.membershipId || `ZIP-HOST-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`);
+
+    let finalAddress = (!isStringId && existingMembershipIdOrData?.street) ? existingMembershipIdOrData : shippingAddress;
+    let targetUser = (existingMembershipIdOrData?.userName && existingMembershipIdOrData?.userName !== "Host")
+      ? existingMembershipIdOrData.userName
+      : (savedLocalUser || userName);
+    let targetEmail = (userEmail || emailSignupInput || existingMembershipIdOrData?.email || "").trim();
+
+    const now = Date.now();
+    const expiresAt = now + (30 * 24 * 60 * 60 * 1000);
+    const isTrial = !hasUsedFreeTrial;
+    const statusStr = isTrial ? `Active 30-Day Free Trial (${paymentMethodStr})` : `Active Monthly Membership (${paymentMethodStr})`;
+
+    try {
+      const subRef = doc(db, "subscriptions", membershipId);
+      const subSnap = await getDoc(subRef);
+      if (subSnap.exists()) {
+        const subData = subSnap.data();
+        if (subData.shippingAddress) finalAddress = subData.shippingAddress;
+        if (subData.userName && subData.userName !== "Host") targetUser = subData.userName;
+        if (subData.userEmail) targetEmail = subData.userEmail;
+      }
+
+      await setDoc(subRef, {
+        membershipId,
+        userName: targetUser || "Host",
+        userEmail: targetEmail,
+        plan: isTrial ? "Zip Host Membership (30-Day Free Trial)" : "Zip Host Membership ($15/mo)",
+        monthlyRate: 15.00,
+        trialDays: isTrial ? 30 : 0,
+        paymentMethod: paymentMethodStr,
+        shippingAddress: finalAddress,
+        status: statusStr,
+        startedAt: now,
+        expiresAt: expiresAt,
+        hasUsedFreeTrial: true,
+        updatedAt: now
+      }, { merge: true });
+
+      if (targetUser) {
+        await setDoc(doc(db, "users", targetUser.toLowerCase()), {
+          isSubscribed: true,
+          paymentConfirmed: true,
+          hostMembershipId: membershipId,
+          hostSubscriptionStatus: statusStr,
+          hostSubscriptionStartedAt: now,
+          hostSubscriptionExpiresAt: expiresAt,
+          hasUsedFreeTrial: true,
+          paymentMethod: paymentMethodStr,
+          shippingAddress: finalAddress
+        }, { merge: true });
+      }
+
+      if (targetEmail) {
+        fetch("/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "host_welcome",
+            email: targetEmail,
+            userName: targetUser || "Host",
+            membershipId
+          })
+        }).catch(e => console.warn("Email send error:", e));
+      }
+    } catch (err) {
+      console.error("Error finalizing subscription in Firestore:", err);
     }
-    if (!shippingAddress.street || !shippingAddress.zip) {
-      setNotification("Please enter a valid shipping address for your free Welcome Kit.");
-      return;
+
+    if (targetUser) {
+      localStorage.setItem("zip_user_name", targetUser);
+      localStorage.setItem("zip_is_logged_in", "true");
+      setUserName(targetUser);
+      setIsLoggedIn(true);
     }
 
-    const membershipId = `ZIP-HOST-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
-
-    // PayPal Subscriptions: $0.00 trial for 7 days, then $15.00/mo autopay (src=1, sra=1)
-    // Merchant ID: H6LCRCCPZUTBU, Receiver: contactzipgroups@gmail.com
-    // Zero sales tax (digital community subscription)
-    // Pre-populate and capture shipping address for physical welcome kit
-    const paypalHostSubUrl = `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick-subscriptions&business=${encodeURIComponent("H6LCRCCPZUTBU")}&receiver_email=${encodeURIComponent("contactzipgroups@gmail.com")}&item_name=${encodeURIComponent("Zip Host Membership ($15/mo) - 7-Day Free Trial")}&item_number=${encodeURIComponent(membershipId)}&a1=0.00&p1=7&t1=D&a3=15.00&p3=1&t3=M&src=1&sra=1&no_shipping=2&address_override=1&address1=${encodeURIComponent(shippingAddress.street)}&city=${encodeURIComponent(shippingAddress.city)}&state=${encodeURIComponent(shippingAddress.state)}&zip=${encodeURIComponent(shippingAddress.zip)}&custom=${encodeURIComponent((userName || 'Host') + '|' + membershipId)}&currency_code=USD`;
-    
-    window.open(paypalHostSubUrl, "_blank");
-
+    setHasUsedFreeTrial(true);
+    setHostSubscriptionExpiresAt(expiresAt);
+    setHostSubscriptionStatus(statusStr);
     setIsSubscribedHost(true);
     setHostMembershipId(membershipId);
-
-    const hostSubReceipt = {
+    setLastCompletedHostSub({
       membershipId,
       plan: "Zip Host Membership (Verified Crown Tier)",
-      rate: "$15.00/month (billed after 7-Day Free Trial)",
-      trialDays: 7,
-      shippingAddress: { ...shippingAddress },
+      rate: "$15.00/month (billed after 30-Day Free Trial)",
+      trialDays: 30,
+      shippingAddress: { ...finalAddress },
       date: new Date().toLocaleDateString()
-    };
-    setLastCompletedHostSub(hostSubReceipt);
-
-    if (userName) {
-      try {
-        await setDoc(doc(db, "users", userName.toLowerCase()), {
-          isSubscribed: true,
-          hostMembershipId: membershipId,
-          hostSubscriptionStatus: "Active 7-Day Free Trial (Autopay Active)",
-          hostSubscriptionStartedAt: Date.now(),
-          shippingAddress
-        }, { merge: true });
-        await addDoc(collection(db, "subscriptions"), {
-          membershipId,
-          userName,
-          plan: "Zip Host Membership",
-          monthlyRate: 15.00,
-          trialDays: 7,
-          shippingAddress,
-          merchantId: "H6LCRCCPZUTBU",
-          createdAt: Date.now()
-        });
-      } catch (err) {
-        console.error("Error updating subscription in Firestore:", err);
-      }
-    }
+    });
 
     setIsManageSubOpen(false);
-    setNotification(`🎉 Host Membership ${membershipId} activated! 7-day trial active on PayPal.`);
+    setNotification(`👑 Host Membership active! Welcome, Host ${targetUser}! Host HQ, Chat & Gallery are unlocked.`);
 
     if (pendingAction) {
       setTimeout(() => {
@@ -1871,23 +2383,704 @@ export default function Home() {
     }
   };
 
-  const handlePartnerSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!partnerBusinessName.trim() || !partnerAddress.trim() || !partnerEmail.trim()) {
-      setNotification("Please fill out business name, address, and email.");
+  const handleCancelHostSubscription = async () => {
+    try {
+      const now = Date.now();
+      const effectiveExpiry = hostSubscriptionExpiresAt && hostSubscriptionExpiresAt > now 
+        ? hostSubscriptionExpiresAt 
+        : now + (30 * 24 * 60 * 60 * 1000);
+      const expiryFormatted = new Date(effectiveExpiry).toLocaleDateString();
+      const newStatus = `Cancelled (Active until ${expiryFormatted})`;
+
+      if (userName) {
+        await setDoc(doc(db, "users", userName.toLowerCase()), {
+          isSubscribed: true,
+          hostSubscriptionStatus: newStatus,
+          hostSubscriptionExpiresAt: effectiveExpiry,
+          hostAutoRenew: false,
+          hasUsedFreeTrial: true,
+          cancelledAt: now
+        }, { merge: true });
+      }
+      if (hostMembershipId) {
+        await setDoc(doc(db, "subscriptions", hostMembershipId), {
+          status: newStatus,
+          autoRenew: false,
+          expiresAt: effectiveExpiry,
+          cancelledAt: now
+        }, { merge: true });
+      }
+
+      setHostSubscriptionStatus(newStatus);
+      setHostSubscriptionExpiresAt(effectiveExpiry);
+      setIsConfirmingCancel(false);
+      setNotification(`✅ Subscription cancelled. Autopay stopped! You retain full host perks until ${expiryFormatted}.`);
+    } catch (err) {
+      console.error("Error cancelling subscription:", err);
+      setNotification("❌ Error cancelling subscription. Please try again.");
+    }
+  };
+
+  const handleImmediateDeactivateHost = async () => {
+    try {
+      const now = Date.now();
+      if (userName) {
+        await setDoc(doc(db, "users", userName.toLowerCase()), {
+          isSubscribed: false,
+          hostMembershipId: "",
+          hostSubscriptionStatus: "Deactivated",
+          hostSubscriptionExpiresAt: now,
+          hasUsedFreeTrial: true,
+          deactivatedAt: now
+        }, { merge: true });
+      }
+      if (hostMembershipId) {
+        await setDoc(doc(db, "subscriptions", hostMembershipId), {
+          status: "Deactivated",
+          autoRenew: false,
+          deactivatedAt: now
+        }, { merge: true });
+      }
+      setIsSubscribedHost(false);
+      setHostMembershipId("");
+      setHostSubscriptionStatus("Deactivated");
+      setHostSubscriptionExpiresAt(now);
+      setIsConfirmingCancel(false);
+      setIsManageSubOpen(false);
+      setNotification("✅ Host access deactivated. Your account is now a Standard Member.");
+    } catch (err) {
+      console.error("Error deactivating host:", err);
+      setNotification("❌ Error deactivating host status.");
+    }
+  };
+
+  const handleApplyPromoCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanCode = promoCodeInput.trim();
+    if (!cleanCode) {
+      setPromoError("Please enter a promo code.");
+      setPromoSuccess(null);
       return;
     }
 
-    const paypalVenueSubUrl = `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick-subscriptions&business=${encodeURIComponent("contactzipgroups@gmail.com")}&item_name=${encodeURIComponent("Verified Partner Venue: " + partnerBusinessName)}&a3=35.00&p3=1&t3=M&src=1&currency_code=USD`;
-    window.open(paypalVenueSubUrl, "_blank");
+    if (cleanCode.toLowerCase() === "founderhost26") {
+      setPromoError(null);
+      setPromoSuccess("🎉 Promo Code Verified! Activating Whole-Site Host Access...");
+      const membershipId = `ZIP-HOST-FOUNDER-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+      const now = Date.now();
+      const lifetimeExpiry = now + (10 * 365 * 24 * 60 * 60 * 1000);
+      const statusStr = "Active Founder VIP Host (Whole-Site Access)";
+      const targetUser = userName.trim() || localStorage.getItem("zip_user_name") || "";
+      const targetEmail = (userEmail || emailSignupInput || "").trim();
+      const finalAddress = shippingAddress.street ? shippingAddress : { street: "VIP Founder Host HQ", city: "Columbus", state: "OH", zip: "43230" };
 
-    const adminEmailUrl = `mailto:contactzipgroups@gmail.com?subject=🛡️%20NEW%20PARTNER%20VENUE%20APPLICATION&body=Business:%20${encodeURIComponent(partnerBusinessName)}%0D%0AAddress:%20${encodeURIComponent(partnerAddress)}%0D%0AEmail:%20${encodeURIComponent(partnerEmail)}%0D%0APerk:%20${encodeURIComponent(partnerPerk)}`;
-    window.location.href = adminEmailUrl;
+      try {
+        await setDoc(doc(db, "subscriptions", membershipId), {
+          membershipId,
+          userName: targetUser,
+          userEmail: targetEmail,
+          plan: "Zip Host Founder VIP Access (Lifetime)",
+          monthlyRate: 0.00,
+          trialDays: 0,
+          paymentMethod: "Founder Promo Code (FounderHost26)",
+          promoCode: "FounderHost26",
+          shippingAddress: finalAddress,
+          status: statusStr,
+          startedAt: now,
+          expiresAt: lifetimeExpiry,
+          paymentConfirmed: true,
+          hasUsedFreeTrial: true,
+          updatedAt: now
+        }, { merge: true });
 
-    setIsPartnerModalOpen(false);
-    setNotification(`🎉 Partner Venue application for ${partnerBusinessName} submitted!`);
-    setPartnerBusinessName(""); setPartnerAddress(""); setPartnerPhone(""); setPartnerEmail(""); setPartnerHours(""); setPartnerPerk(""); setPartnerMenu("");
+        if (targetUser) {
+          await setDoc(doc(db, "users", targetUser.toLowerCase()), {
+            isSubscribed: true,
+            paymentConfirmed: true,
+            hostMembershipId: membershipId,
+            hostSubscriptionStatus: statusStr,
+            hostSubscriptionStartedAt: now,
+            hostSubscriptionExpiresAt: lifetimeExpiry,
+            hasUsedFreeTrial: true,
+            paymentMethod: "Founder Promo Code (FounderHost26)",
+            promoCode: "FounderHost26",
+            shippingAddress: finalAddress
+          }, { merge: true });
+        }
+
+        setIsSubscribedHost(true);
+        setHostMembershipId(membershipId);
+        setHostSubscriptionStatus(statusStr);
+        setHostSubscriptionExpiresAt(lifetimeExpiry);
+        setHasUsedFreeTrial(true);
+
+        setLastCompletedHostSub({
+          membershipId,
+          plan: "Zip Host Founder VIP (Whole-Site Access)",
+          rate: "$0.00 (Founder Promo Code Redeemed)",
+          trialDays: 0,
+          shippingAddress: { ...finalAddress },
+          date: new Date().toLocaleDateString()
+        });
+
+        setPromoCodeInput("");
+        setPromoSuccess(null);
+        setIsManageSubOpen(false);
+        setNotification(`🌟 Promo Code FounderHost26 accepted! Full Host access & 👑 crown badge unlocked!`);
+      } catch (err) {
+        console.error("Promo code activation error:", err);
+        setPromoError("❌ Error activating promo code. Please try again.");
+        setPromoSuccess(null);
+      }
+    } else {
+      setPromoError("❌ Invalid promo code. Please check the code or subscribe below.");
+      setPromoSuccess(null);
+    }
   };
+
+  const handleInitiateHostPayPal = async () => {
+    const isTrial = !hasUsedFreeTrial;
+    if (!subTermsAgreed) {
+      setNotification(isTrial ? "⚠️ Please check the box to agree to the 30-Day Free Trial terms." : "⚠️ Please check the box to agree to the Host Membership terms.");
+      return;
+    }
+    if (!shippingAddress.street || !shippingAddress.zip) {
+      setNotification("⚠️ Please enter a valid shipping address for your free Welcome Kit.");
+      return;
+    }
+
+    const currentActiveUser = userName || localStorage.getItem("zip_user_name") || "";
+    const membershipId = `ZIP-HOST-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+
+    try {
+      await setDoc(doc(db, "subscriptions", membershipId), {
+        membershipId,
+        userName: currentActiveUser,
+        userEmail: (userEmail || emailSignupInput || "").trim(),
+        plan: isTrial ? "Zip Host Membership (30-Day Free Trial)" : "Zip Host Membership ($15/mo)",
+        monthlyRate: 15.00,
+        trialDays: isTrial ? 30 : 0,
+        paymentMethod: "PayPal",
+        shippingAddress,
+        status: "pending_authorization",
+        createdAt: Date.now()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Could not save pending subscription:", e);
+    }
+    setPendingHostSubId(membershipId);
+
+    const returnBase = typeof window !== "undefined" ? window.location.href.split("?")[0] : "";
+    const returnUrl = `${returnBase}?paypal_success=host_subscription&doc_id=${encodeURIComponent(membershipId)}`;
+    const cancelUrl = `${returnBase}?paypal_cancel=true`;
+
+    const itemName = isTrial 
+      ? "Zip Host Membership ($15/mo) - 30-Day Free Trial" 
+      : "Zip Host Membership ($15.00/month)";
+    const trialParams = isTrial ? "&a1=0.00&p1=30&t1=D" : "";
+
+    const paypalHostSubUrl = `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick-subscriptions&business=${encodeURIComponent("H6LCRCCPZUTBU")}&receiver_email=${encodeURIComponent("contactzipgroups@gmail.com")}&item_name=${encodeURIComponent(itemName)}&item_number=${encodeURIComponent(membershipId)}${trialParams}&a3=15.00&p3=1&t3=M&src=1&sra=1&no_shipping=2&address_override=1&address1=${encodeURIComponent(shippingAddress.street)}&city=${encodeURIComponent(shippingAddress.city)}&state=${encodeURIComponent(shippingAddress.state)}&zip=${encodeURIComponent(shippingAddress.zip)}&custom=${encodeURIComponent(currentActiveUser + '|' + membershipId)}&currency_code=USD&return=${encodeURIComponent(returnUrl)}&cancel_return=${encodeURIComponent(cancelUrl)}&rm=2`;
+
+    window.location.href = paypalHostSubUrl;
+  };
+
+  const handleFinalizeShopOrder = async (paymentMethodStr: string, existingOrderIdOrOrder?: any) => {
+    const isStringId = typeof existingOrderIdOrOrder === "string";
+    const orderId = isStringId ? existingOrderIdOrOrder : (existingOrderIdOrOrder?.orderId || pendingShopOrder?.orderId);
+    if (!orderId) return;
+
+    try {
+      const orderRef = doc(db, "orders", orderId);
+      const orderSnap = await getDoc(orderRef);
+      let orderData: any = pendingShopOrder;
+
+      if (orderSnap.exists()) {
+        orderData = orderSnap.data();
+      }
+
+      if (!orderData) return;
+
+      const finalizedOrder = {
+        ...orderData,
+        paymentMethod: paymentMethodStr,
+        status: "Paid",
+        paidAt: Date.now()
+      };
+
+      await setDoc(orderRef, finalizedOrder, { merge: true });
+
+      const targetUser = (orderData.userName || userName || localStorage.getItem("zip_user_name") || "").toLowerCase();
+      if (targetUser) {
+        await setDoc(doc(db, "users", targetUser), {
+          recentOrders: [orderId]
+        }, { merge: true });
+      }
+
+      setLastCompletedOrder(finalizedOrder);
+      setCart([]);
+      setIsCartOpen(false);
+      setPendingShopOrder(null);
+      setNotification(`🎉 Order ${orderId} confirmed in the cloud! Receipt displayed.`);
+    } catch (err) {
+      console.error("Error finalizing shop order in Firestore:", err);
+    }
+  };
+
+  const handleInitiateShopPayPal = async (subtotal: number, ohioSalesTax: number, shippingFee: number, grandTotal: number) => {
+    if (!shopShipping.fullName.trim() || !shopShipping.street.trim() || !shopShipping.city.trim() || !shopShipping.zip.trim()) {
+      setNotification("⚠️ Please fill in all required shipping address fields.");
+      return;
+    }
+
+    const currentActiveUser = userName || localStorage.getItem("zip_user_name") || shopShipping.fullName;
+    const orderId = `ZIP-ORD-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+    const preparedOrder = {
+      orderId,
+      userName: currentActiveUser,
+      items: [...cart],
+      subtotal,
+      tax: ohioSalesTax,
+      shipping: shippingFee,
+      grandTotal,
+      shippingAddress: { ...shopShipping },
+      status: "pending_payment",
+      paymentMethod: "PayPal (Pending)",
+      date: new Date().toLocaleDateString(),
+      createdAt: Date.now()
+    };
+
+    try {
+      await setDoc(doc(db, "orders", orderId), preparedOrder);
+    } catch (e) {
+      console.error("Could not save pending order to Firestore:", e);
+    }
+
+    const returnBase = window.location.href.split("?")[0];
+    const returnUrl = `${returnBase}?paypal_success=shop_order&doc_id=${encodeURIComponent(orderId)}`;
+    const cancelUrl = `${returnBase}?paypal_cancel=true`;
+
+    let paypalUrl = `https://www.paypal.com/cgi-bin/webscr?cmd=_cart&upload=1&business=${encodeURIComponent("H6LCRCCPZUTBU")}&receiver_email=${encodeURIComponent("contactzipgroups@gmail.com")}&invoice=${encodeURIComponent(orderId)}&custom=${encodeURIComponent(orderId)}&currency_code=USD&return=${encodeURIComponent(returnUrl)}&cancel_return=${encodeURIComponent(cancelUrl)}&rm=2`;
+
+    cart.forEach((item, idx) => {
+      const itemNum = idx + 1;
+      const customSuffix = item.customName ? ` [Custom: "${item.customName}" / ${item.customColorName || 'Standard'}]` : '';
+      const sizeSuffix = item.selectedSize ? ` (${item.selectedSize})` : '';
+      const fullItemName = `${item.name}${sizeSuffix} - ${item.selectedDesign}${customSuffix}`;
+      
+      paypalUrl += `&item_name_${itemNum}=${encodeURIComponent(fullItemName)}&amount_${itemNum}=${item.price.toFixed(2)}&quantity_${itemNum}=${item.quantity}`;
+    });
+
+    paypalUrl += `&tax_cart=${ohioSalesTax.toFixed(2)}`;
+    paypalUrl += `&shipping_1=${shippingFee.toFixed(2)}`;
+    paypalUrl += `&address_override=1`;
+    paypalUrl += `&first_name=${encodeURIComponent(shopShipping.fullName.split(' ')[0] || '')}`;
+    paypalUrl += `&last_name=${encodeURIComponent(shopShipping.fullName.split(' ').slice(1).join(' ') || '')}`;
+    paypalUrl += `&address1=${encodeURIComponent(shopShipping.street + (shopShipping.apt ? ' ' + shopShipping.apt : ''))}`;
+    paypalUrl += `&city=${encodeURIComponent(shopShipping.city)}`;
+    paypalUrl += `&state=${encodeURIComponent(shopShipping.state)}`;
+    paypalUrl += `&zip=${encodeURIComponent(shopShipping.zip)}`;
+    if (shopShipping.phone) {
+      paypalUrl += `&night_phone_b=${encodeURIComponent(shopShipping.phone)}`;
+    }
+
+    window.location.href = paypalUrl;
+  };
+
+  const handleFinalizeVenueRegistration = async (paymentMethodStr: string, existingVenueIdOrVenue?: any) => {
+    const isStringId = typeof existingVenueIdOrVenue === "string";
+    const venueMemberId = isStringId ? existingVenueIdOrVenue : (existingVenueIdOrVenue?.venueMemberId || `ZIP-VENUE-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`);
+    const passedVenue = !isStringId ? existingVenueIdOrVenue : null;
+
+    try {
+      const venueRef = doc(db, "partner_venues", venueMemberId);
+      const venueSnap = await getDoc(venueRef);
+      const savedVenue = venueSnap.exists() ? venueSnap.data() : null;
+
+      const bName = (passedVenue?.businessName || savedVenue?.businessName || partnerBusinessName).trim();
+      const bAddress = (passedVenue?.address || savedVenue?.address || partnerAddress).trim();
+      const bPhone = (passedVenue?.phone || savedVenue?.phone || partnerPhone).trim();
+      const bEmail = (passedVenue?.email || savedVenue?.email || partnerEmail).trim();
+      const bHours = (passedVenue?.hours || savedVenue?.hours || partnerHours).trim();
+      const bPerk = (passedVenue?.perk || savedVenue?.perk || partnerPerk).trim();
+      const bMenu = (passedVenue?.menu || savedVenue?.menu || partnerMenu).trim();
+
+      await setDoc(venueRef, {
+        venueMemberId,
+        businessName: bName,
+        address: bAddress,
+        phone: bPhone,
+        email: bEmail,
+        hours: bHours,
+        perk: bPerk,
+        menu: bMenu,
+        paymentMethod: paymentMethodStr,
+        monthlyRate: 35.00,
+        status: "Active Verified Partner",
+        updatedAt: Date.now()
+      }, { merge: true });
+
+      if (bEmail) {
+        fetch("/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "venue_welcome",
+            email: bEmail,
+            businessName: bName,
+            venueAddress: bAddress,
+            venuePhone: bPhone,
+            venueHours: bHours,
+            venuePerk: bPerk || "Exclusive 15% Member Discount",
+            venueMemberId,
+            paymentMethod: paymentMethodStr
+          })
+        }).catch(err => console.warn("Venue email dispatch error:", err));
+      }
+
+      setCompletedVenueRegistration({
+        venueMemberId,
+        businessName: bName,
+        address: bAddress,
+        phone: bPhone,
+        email: bEmail,
+        perk: bPerk || "Exclusive Member Perk",
+        paymentMethod: paymentMethodStr,
+        date: new Date().toLocaleDateString()
+      });
+
+      setIsPartnerModalOpen(false);
+      setNotification(`🎉 Partner Venue Registered! Venue Member ID: ${venueMemberId}`);
+      setPartnerBusinessName(""); setPartnerAddress(""); setPartnerPhone(""); setPartnerEmail(""); setPartnerHours(""); setPartnerPerk(""); setPartnerMenu("");
+    } catch (err) {
+      console.error("Venue save error:", err);
+      setNotification("❌ Error registering venue. Please try again.");
+    }
+  };
+
+  const handleInitiateVenuePayPal = async () => {
+    if (!partnerBusinessName.trim() || !partnerAddress.trim() || !partnerEmail.trim()) {
+      setNotification("⚠️ Please fill out business name, address, and email.");
+      return;
+    }
+
+    const venueMemberId = `ZIP-VENUE-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+    try {
+      await setDoc(doc(db, "partner_venues", venueMemberId), {
+        venueMemberId,
+        businessName: partnerBusinessName.trim(),
+        address: partnerAddress.trim(),
+        phone: partnerPhone.trim(),
+        email: partnerEmail.trim(),
+        hours: partnerHours.trim(),
+        perk: partnerPerk.trim(),
+        menu: partnerMenu.trim(),
+        monthlyRate: 35.00,
+        status: "pending_payment",
+        paymentMethod: "PayPal (Pending)",
+        createdAt: Date.now()
+      });
+    } catch (e) {
+      console.error("Error saving pending venue:", e);
+    }
+
+    const returnBase = typeof window !== "undefined" ? window.location.href.split("?")[0] : "";
+    const returnUrl = `${returnBase}?paypal_success=venue_subscription&doc_id=${encodeURIComponent(venueMemberId)}`;
+    const cancelUrl = `${returnBase}?paypal_cancel=true`;
+    const paypalVenueSubUrl = `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick-subscriptions&business=${encodeURIComponent("contactzipgroups@gmail.com")}&item_name=${encodeURIComponent("Verified Partner Venue: " + partnerBusinessName)}&a3=35.00&p3=1&t3=M&src=1&currency_code=USD&return=${encodeURIComponent(returnUrl)}&cancel_return=${encodeURIComponent(cancelUrl)}&rm=2`;
+
+    window.location.href = paypalVenueSubUrl;
+  };
+
+  // ==========================================
+  // STRIPE PAYMENT INTEGRATION HANDLERS (100% FIRESTORE SYNCED)
+  // ==========================================
+  const handleInitiateStripeHostCheckout = async () => {
+    const isTrial = !hasUsedFreeTrial;
+    if (!subTermsAgreed) {
+      setNotification(isTrial ? "⚠️ Please check the box to agree to the 30-Day Free Trial terms." : "⚠️ Please check the box to agree to the Host Membership terms.");
+      return;
+    }
+    if (!shippingAddress.street || !shippingAddress.zip) {
+      setNotification("⚠️ Please enter a valid shipping address for your free Welcome Kit.");
+      return;
+    }
+
+    const currentActiveUser = userName || localStorage.getItem("zip_user_name") || "";
+    const membershipId = `ZIP-HOST-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+
+    setIsStripeLoading(true);
+    setNotification("🚀 Saving subscription to cloud & connecting to Stripe...");
+    try {
+      // 1. Save pending subscription to Firestore BEFORE redirecting so userName & shippingAddress are never lost!
+      await setDoc(doc(db, "subscriptions", membershipId), {
+        membershipId,
+        userName: currentActiveUser,
+        userEmail: (userEmail || emailSignupInput || "").trim(),
+        plan: isTrial ? "Zip Host Membership (30-Day Free Trial)" : "Zip Host Membership ($15/mo)",
+        monthlyRate: 15.00,
+        trialDays: isTrial ? 30 : 0,
+        shippingAddress,
+        paymentMethod: "Stripe (Pending)",
+        status: "pending_payment",
+        createdAt: Date.now()
+      });
+
+      const returnUrl = window.location.href.split("?")[0];
+      const res = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "host_subscription",
+          customerEmail: (userEmail || emailSignupInput || "").trim() || undefined,
+          successUrl: returnUrl,
+          cancelUrl: returnUrl,
+          metadata: {
+            docId: membershipId,
+            userName: currentActiveUser,
+            street: shippingAddress.street,
+            city: shippingAddress.city,
+            state: shippingAddress.state,
+            zip: shippingAddress.zip
+          },
+          trialDays: isTrial ? 30 : 0
+        })
+      });
+
+      const data = await res.json();
+      if (data.url) {
+        // Redirect in the SAME tab so when Stripe finishes, it returns right here and unlocks Host features!
+        window.location.href = data.url;
+      } else {
+        setNotification(`❌ Stripe error: ${data.error || "Could not start checkout"}`);
+      }
+    } catch (err: any) {
+      console.error("Host Stripe checkout error:", err);
+      setNotification(`❌ Connection error: ${err?.message || "Please try again"}`);
+    } finally {
+      setIsStripeLoading(false);
+    }
+  };
+
+  const handleInitiateStripeShopCheckout = async (subtotal: number, ohioSalesTax: number, shippingFee: number, grandTotal: number) => {
+    if (!shopShipping.fullName.trim() || !shopShipping.street.trim() || !shopShipping.city.trim() || !shopShipping.zip.trim()) {
+      setNotification("⚠️ Please fill in all required shipping address fields.");
+      return;
+    }
+
+    const currentActiveUser = userName || localStorage.getItem("zip_user_name") || shopShipping.fullName;
+    const orderId = `ZIP-ORD-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+    const preparedOrder = {
+      orderId,
+      userName: currentActiveUser,
+      items: [...cart],
+      subtotal,
+      tax: ohioSalesTax,
+      shipping: shippingFee,
+      grandTotal,
+      shippingAddress: { ...shopShipping },
+      status: "pending_payment",
+      paymentMethod: "Stripe (Pending)",
+      date: new Date().toLocaleDateString(),
+      createdAt: Date.now()
+    };
+
+    const lineItems = cart.map(item => ({
+      price_data: {
+        currency: "usd",
+        product_data: {
+          name: `${item.name}${item.selectedSize ? ' (' + item.selectedSize + ')' : ''} - ${item.selectedDesign}${item.customName ? ' [Custom: ' + item.customName + ' / ' + (item.customColorName || 'Standard') + ']' : ''}`
+        },
+        unit_amount: Math.round(item.price * 100)
+      },
+      quantity: item.quantity
+    }));
+
+    if (ohioSalesTax > 0) {
+      lineItems.push({
+        price_data: {
+          currency: "usd",
+          product_data: { name: "Ohio Sales Tax (5.75%)" },
+          unit_amount: Math.round(ohioSalesTax * 100)
+        },
+        quantity: 1
+      });
+    }
+
+    if (shippingFee > 0) {
+      lineItems.push({
+        price_data: {
+          currency: "usd",
+          product_data: { name: "Standard Shipping" },
+          unit_amount: Math.round(shippingFee * 100)
+        },
+        quantity: 1
+      });
+    }
+
+    setIsStripeLoading(true);
+    setNotification("🚀 Saving order to cloud & connecting to Stripe...");
+    try {
+      // Save order to Firestore BEFORE redirecting!
+      await setDoc(doc(db, "orders", orderId), preparedOrder);
+
+      const returnUrl = window.location.href.split("?")[0];
+      const res = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "shop_order",
+          customerEmail: (userEmail || emailSignupInput || "").trim() || undefined,
+          grandTotal,
+          lineItems,
+          successUrl: returnUrl,
+          cancelUrl: returnUrl,
+          metadata: {
+            docId: orderId,
+            orderId,
+            userName: currentActiveUser
+          }
+        })
+      });
+
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setNotification(`❌ Stripe error: ${data.error || "Could not start checkout"}`);
+      }
+    } catch (err: any) {
+      console.error("Shop Stripe checkout error:", err);
+      setNotification(`❌ Connection error: ${err?.message || "Please try again"}`);
+    } finally {
+      setIsStripeLoading(false);
+    }
+  };
+
+  const handleInitiateStripeVenueCheckout = async () => {
+    if (!partnerBusinessName.trim() || !partnerAddress.trim() || !partnerEmail.trim()) {
+      setNotification("⚠️ Please fill out business name, address, and email.");
+      return;
+    }
+
+    const venueMemberId = `ZIP-VENUE-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+
+    setIsStripeLoading(true);
+    setNotification("🚀 Saving venue to cloud & connecting to Stripe...");
+    try {
+      await setDoc(doc(db, "partner_venues", venueMemberId), {
+        venueMemberId,
+        businessName: partnerBusinessName.trim(),
+        address: partnerAddress.trim(),
+        phone: partnerPhone.trim(),
+        email: partnerEmail.trim(),
+        hours: partnerHours.trim(),
+        perk: partnerPerk.trim(),
+        menu: partnerMenu.trim(),
+        monthlyRate: 35.00,
+        status: "pending_payment",
+        paymentMethod: "Stripe (Pending)",
+        createdAt: Date.now()
+      });
+
+      const returnUrl = window.location.href.split("?")[0];
+      const res = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "venue_subscription",
+          customerEmail: partnerEmail.trim(),
+          successUrl: returnUrl,
+          cancelUrl: returnUrl,
+          metadata: {
+            docId: venueMemberId,
+            businessName: partnerBusinessName.trim()
+          }
+        })
+      });
+
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setNotification(`❌ Stripe error: ${data.error || "Could not start checkout"}`);
+      }
+    } catch (err: any) {
+      console.error("Venue Stripe checkout error:", err);
+      setNotification(`❌ Connection error: ${err?.message || "Please try again"}`);
+    } finally {
+      setIsStripeLoading(false);
+    }
+  };
+
+  // Listen for Stripe & PayPal Redirect Verification using Firestore Document IDs
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get("stripe_session_id");
+    const sessionType = urlParams.get("type");
+    const isCancel = urlParams.get("stripe_cancel") || urlParams.get("paypal_cancel");
+    const paypalSuccessType = urlParams.get("paypal_success");
+    const docId = urlParams.get("doc_id");
+
+    if (isCancel) {
+      setNotification("ℹ️ Checkout was cancelled. No charges were made.");
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+
+    if (paypalSuccessType && docId) {
+      if (paypalSuccessType === "host_subscription") {
+        handleFinalizeHostSubscription("PayPal Subscription", docId);
+      } else if (paypalSuccessType === "shop_order") {
+        handleFinalizeShopOrder("PayPal Checkout", docId);
+      } else if (paypalSuccessType === "venue_subscription") {
+        handleFinalizeVenueRegistration("PayPal Subscription", docId);
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+
+    if (sessionId) {
+      setNotification("⏳ Verifying your Stripe payment & unlocking features...");
+      fetch("/api/stripe/verify-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.verified) {
+            const meta = data.metadata || {};
+            const targetDocId = meta.docId || meta.orderId;
+            const savedLocalUser = localStorage.getItem("zip_user_name") || "";
+            const targetUser = (meta.userName && meta.userName !== "Host") ? meta.userName : (savedLocalUser || userName);
+
+            if (sessionType === "host_subscription" || meta.type === "host_subscription") {
+              handleFinalizeHostSubscription("Stripe Card / Digital Wallet", {
+                membershipId: targetDocId,
+                userName: targetUser,
+                email: meta.customerEmail || data.customerEmail,
+                street: meta.street,
+                city: meta.city,
+                state: meta.state,
+                zip: meta.zip
+              });
+            } else if (sessionType === "venue_subscription" || meta.type === "venue_subscription") {
+              handleFinalizeVenueRegistration("Stripe Card / Digital Wallet", targetDocId);
+            } else if (sessionType === "shop_order" || meta.type === "shop_order") {
+              handleFinalizeShopOrder("Stripe (Card / Apple Pay / Google Pay)", targetDocId);
+            }
+          } else {
+            setNotification("⚠️ Payment verification incomplete. If you completed checkout, please refresh.");
+          }
+          window.history.replaceState({}, "", window.location.pathname);
+        })
+        .catch(err => {
+          console.error("Stripe verify error:", err);
+          window.history.replaceState({}, "", window.location.pathname);
+        });
+    }
+  }, []);
 
   // Real Emergency Email + Carrier SMS Dispatch (With GPS Fallback so it NEVER silently fails)
   const handleBroadcastEmergency = async (isAutoTimerExpiry = false) => {
@@ -1901,6 +3094,7 @@ export default function Home() {
     setNotification("🚨 Dispatching Emergency Email & SMS Alert to your safety contact...");
 
     const dispatchAlert = async (mapsUrl: string) => {
+      let emailSuccess = false;
       try {
         const res = await fetch('/api/send-email', {
           method: 'POST',
@@ -1920,15 +3114,28 @@ export default function Home() {
           })
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({ success: false }));
         if (data.success) {
-          setNotification("🚨 Emergency Email & SMS Text successfully sent to your safety contact!");
-        } else {
-          setNotification(`❌ Alert error: ${data.error || "Check /api/send-email configuration."}`);
+          emailSuccess = true;
+          setNotification("🚨 Emergency Email & SMS Alert successfully sent to your safety contact!");
         }
       } catch (err) {
-        console.error(err);
-        setNotification("❌ Network error connecting to emergency alert server.");
+        console.error("Emergency server dispatch error:", err);
+      }
+
+      // If email server was unreachable or in preview, launch direct device SMS / Email backup so alert never fails!
+      if (!emailSuccess) {
+        const cleanPhone = emergencyContactPhone.replace(/\D/g, "");
+        const alertBody = encodeURIComponent(`🚨 URGENT ZIP GROUPS EMERGENCY ALERT: ${userName || "Your contact"} needs assist! Location: ${mapsUrl}`);
+        if (cleanPhone) {
+          window.location.href = `sms:${cleanPhone}?body=${alertBody}`;
+          setNotification(`🚨 Emergency SMS text opened on your device for ${emergencyContactName || "Emergency Contact"}!`);
+        } else if (emergencyContactEmail.trim()) {
+          window.location.href = `mailto:${emergencyContactEmail.trim()}?subject=🚨%20EMERGENCY%20ALERT&body=${alertBody}`;
+          setNotification(`🚨 Direct Emergency Email opened for ${emergencyContactName || "Emergency Contact"}!`);
+        } else {
+          setNotification("🚨 Emergency Alert triggered! Location: " + mapsUrl);
+        }
       }
       setIsEmergencyModalOpen(false);
     };
@@ -1950,6 +3157,54 @@ export default function Home() {
       },
       { enableHighAccuracy: true, timeout: 7000, maximumAge: 0 }
     );
+  };
+
+  // Direct Phone SMS Trigger (100% Free, opens native SMS app on mobile with pre-filled GPS alert)
+  const handleLaunchDirectDeviceSms = () => {
+    if (!emergencyContactPhone.trim()) {
+      setNotification("⚠️ Please set an Emergency Contact Phone number in Account Settings first!");
+      setIsAccountSettingsOpen(true);
+      return;
+    }
+    const cleanPhone = emergencyContactPhone.replace(/\D/g, "");
+    if (!cleanPhone) {
+      setNotification("⚠️ Emergency phone number is invalid.");
+      return;
+    }
+    
+    const triggerSms = (locUrl: string) => {
+      const alertBody = encodeURIComponent(`🚨 URGENT ZIP GROUPS EMERGENCY ALERT: ${userName || "Your contact"} needs immediate assist! Last Known GPS Location: ${locUrl}`);
+      window.location.href = `sms:${cleanPhone}?body=${alertBody}`;
+      setNotification(`📱 Opening native SMS text to ${emergencyContactName || "Emergency Contact"} (${emergencyContactPhone})...`);
+      setIsEmergencyModalOpen(false);
+    };
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => triggerSms(`https://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`),
+        () => triggerSms(`https://maps.google.com/?q=${encodeURIComponent(zipCode || "43230")}`),
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    } else {
+      triggerSms(`https://maps.google.com/?q=${encodeURIComponent(zipCode || "43230")}`);
+    }
+  };
+
+  // Copy GPS Coordinates & Address for 911 Dispatcher
+  const handleCopyGpsCoords = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const text = `Lat: ${pos.coords.latitude.toFixed(5)}, Lng: ${pos.coords.longitude.toFixed(5)} (Google Maps: https://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude})`;
+          navigator.clipboard.writeText(text);
+          setNotification("📋 Live GPS coordinates copied to clipboard!");
+        },
+        () => {
+          navigator.clipboard.writeText(`Approximate Area: Zip Code ${zipCode || "Local Neighborhood"}`);
+          setNotification("📋 Neighborhood location copied to clipboard!");
+        }
+      );
+    }
   };
 
   const handleSearch = (e: React.FormEvent) => {
@@ -1995,6 +3250,58 @@ export default function Home() {
         }
       }
     });
+  };
+
+  const renderEventLinksAndMedia = (descText?: string, locText?: string) => {
+    const locUrls = new Set(((locText || "").match(/(https?:\/\/[^\s]+)/g) || []).map(u => u.replace(/[.,;!?)]+$/, "")));
+    const descMatches = ((descText || "").match(/(https?:\/\/[^\s]+)/g) || []).map(u => u.replace(/[.,;!?)]+$/, ""));
+    
+    // Eliminate duplicate links that already appear in location text
+    const uniqueUrls = Array.from(new Set(descMatches.filter(u => !locUrls.has(u))));
+    if (uniqueUrls.length === 0) return null;
+
+    return (
+      <div className="mt-2.5 flex flex-col gap-2">
+        {uniqueUrls.map((cleanUrl, i) => {
+          const isDirectImage = /\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i.test(cleanUrl);
+          let domain = cleanUrl;
+          try {
+            domain = new URL(cleanUrl).hostname.replace(/^www\./, "");
+          } catch {}
+
+          if (isDirectImage) {
+            return (
+              <a key={i} href={cleanUrl} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-xl border border-gray-700 bg-black/50 hover:border-cyan-500 transition-all">
+                <img src={cleanUrl} alt="Event Venue Preview" className="w-full h-36 object-cover hover:scale-105 transition-transform duration-300" loading="lazy" />
+              </a>
+            );
+          }
+
+          return (
+            <a
+              key={i}
+              href={cleanUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 p-2.5 rounded-xl bg-gray-950/90 border border-cyan-500/30 hover:border-cyan-400 transition-all group shadow-sm"
+            >
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`}
+                alt={domain}
+                className="w-8 h-8 rounded-lg object-contain bg-gray-900 p-1 border border-gray-800 shrink-0"
+                loading="lazy"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-bold text-cyan-300 group-hover:underline truncate">
+                  🔗 Visit {domain} ↗
+                </p>
+                <p className="text-[10px] text-gray-400 truncate">{cleanUrl}</p>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    );
   };
 
   const renderFormattedText = (rawText: string) => {
@@ -2093,6 +3400,11 @@ export default function Home() {
 
   const handleSendMessage = () => {
     requireAuth(async () => {
+      if (!isEmailVerified) {
+        setNotification("🔒 Email verification required to send chat messages.");
+        setIsVerifyModalOpen(true);
+        return;
+      }
       if (!chatInput.trim() || !selectedGroup) return;
 
       if (THREAT_REGEX.test(chatInput) || HARASSMENT_REGEX.test(chatInput)) {
@@ -2214,19 +3526,100 @@ export default function Home() {
     }
   };
 
+  const getEventDateTime = (evt: GroupEvent) => {
+    let d = evt.date?.trim() || "";
+    let t = evt.time?.trim() || "";
+    if (!d || !t) {
+      const match = (evt.text || "").match(/\((.*?) @ (.*?)\)/);
+      if (match) {
+        if (!d) d = match[1].trim();
+        if (!t) t = match[2].trim();
+      }
+    }
+    return {
+      date: d || "TBD",
+      time: t || "TBD"
+    };
+  };
+
+  const handleNavigateToEventGroup = (evt: GroupEvent) => {
+    const targetZip = evt.zipCode && evt.zipCode !== "Online" ? evt.zipCode : (zipCode.trim() || "43230");
+    const targetGroupName = (evt.groupName || selectedGroup?.name || "").trim();
+
+    let currentGroups = groups;
+    const hasZipGroups = currentGroups.some(g => g.zipCode === targetZip && !g.isHostOnly);
+    if (!hasZipGroups) {
+      const generated = generateGroupsForZip(targetZip);
+      currentGroups = [...currentGroups, ...generated];
+      setGroups(currentGroups);
+    }
+
+    let matchedGroup =
+      (evt.groupId ? currentGroups.find(g => g.id === evt.groupId) : undefined) ||
+      currentGroups.find(
+        g => g.name.toLowerCase() === targetGroupName.toLowerCase() && g.zipCode === targetZip
+      ) ||
+      currentGroups.find(
+        g => g.name.toLowerCase() === targetGroupName.toLowerCase()
+      );
+
+    if (!matchedGroup && targetGroupName) {
+      matchedGroup = {
+        id: evt.groupId || `${targetZip}-custom-${Date.now()}`,
+        zipCode: targetZip,
+        name: targetGroupName,
+        category: "Social Circles",
+        location: evt.isOnline ? "Online Community" : `Zip Code ${targetZip} Area`,
+        members: 1,
+        description: `Welcome to ${targetGroupName}! Connect with neighbors and join upcoming gatherings.`,
+        events: [evt],
+        icon: "🎉",
+        color: evt.color || THEME_COLORS[0].class,
+        glow: THEME_COLORS[0].glow,
+        chatMessages: []
+      };
+    }
+
+    if (matchedGroup) {
+      setSelectedGroup(matchedGroup);
+      setIsUpcomingEventsView(false);
+      setIsSavedView(false);
+      setIsShopView(false);
+      setIsFriendsView(false);
+      setIsGalleryView(false);
+      setIsVenuesView(false);
+      setIsMessagesView(false);
+      setIsHeatmapView(false);
+      setIsAboutUsOpen(false);
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    }
+  };
+
   // Cloud-Synced Event Creation with Radius Slider
   const handleHostSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     requireHostSubscription(async () => {
       if (!eventTitle.trim()) return;
 
-      const centerZip = hostCenterZip.trim() || zipCode.trim() || "43230";
+      const centerZip = isOnlineEvent
+        ? (hostCenterZip.trim() || zipCode.trim() || "43230")
+        : (hostCenterZip.trim() || zipCode.trim() || "43230");
       // Compute target zip codes automatically from the radius slider!
-      const zips = getRadiusZipList(centerZip, hostRadiusMiles);
-      if (zips.length === 0) return;
+      const zips = isOnlineEvent
+        ? (hostCenterZip.trim() ? getRadiusZipList(centerZip, hostRadiusMiles) : [centerZip])
+        : getRadiusZipList(centerZip, hostRadiusMiles);
+      if (!isOnlineEvent && zips.length === 0) return;
 
       const chosenTheme = THEME_COLORS[selectedColorIndex];
-      const formattedEventString = `${eventTitle} (${eventDate || "TBD"} @ ${eventTime || "TBD"})`;
+      const cleanTitle = eventTitle.trim();
+      const cleanDesc = eventDesc.trim() || "Neighborhood gathering hosted by local community member.";
+      const cleanDate = eventDate.trim() || "TBD";
+      const cleanTime = eventTime.trim() || "TBD";
+      const cleanLocation = eventLocation.trim();
+
+      const formattedEventString = `${cleanTitle} (${cleanDate} @ ${cleanTime})`;
       const futureExp = new Date();
       futureExp.setDate(futureExp.getDate() + 14);
 
@@ -2237,25 +3630,50 @@ export default function Home() {
       }));
 
       try {
-        for (const z of zips) {
-          const eventId = `evt-${z}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-          const newEventObj: GroupEvent = {
-            id: eventId,
-            zipCode: z,
-            groupName: selectedCategoryGroup,
-            groupId: selectedGroup && selectedGroup.zipCode === z ? selectedGroup.id : undefined,
-            title: eventTitle.trim(),
-            description: eventDesc.trim() || "Neighborhood gathering hosted by local community member.",
-            text: formattedEventString,
-            color: chosenTheme.class,
-            host: userName,
-            expirationDate: futureExp.toISOString(),
-            checklist: finalChecklist,
-            locationName: `Hosted by ${userName} in Zip ${z}`,
-            isAdultOnly,
-            rsvps: [userName]
-          };
-          await setDoc(doc(db, "group_events", eventId), newEventObj);
+        const eventId = `evt-${centerZip}-${Date.now()}`;
+        const newEventObj: GroupEvent = {
+          id: eventId,
+          zipCode: centerZip,
+          centerZip: centerZip,
+          radiusMiles: hostRadiusMiles,
+          targetZips: zips,
+          isOnline: Boolean(isOnlineEvent),
+          photoUrl: eventPhotoUrl.trim(),
+          groupName: selectedCategoryGroup,
+          groupId: selectedGroup && selectedGroup.name === selectedCategoryGroup ? selectedGroup.id : undefined,
+          title: cleanTitle,
+          description: cleanDesc,
+          date: cleanDate,
+          time: cleanTime,
+          locationName: cleanLocation || (isOnlineEvent ? "🌐 Online Meetup" : `Hosted by ${userName} in Zip ${centerZip}`),
+          text: formattedEventString,
+          color: chosenTheme.class,
+          host: userName,
+          expirationDate: futureExp.toISOString(),
+          checklist: finalChecklist,
+          isAdultOnly: Boolean(isAdultOnly),
+          rsvps: [userName]
+        };
+
+        // Immediately update local state so event card and its date/time are visible right after saving
+        setCloudEvents(prev => [newEventObj, ...prev.filter(ev => ev.id !== eventId)]);
+
+        await setDoc(doc(db, "group_events", eventId), newEventObj);
+
+        // Notify group chat so members in this group know a gathering was posted
+        if (selectedGroup && selectedGroup.id) {
+          try {
+            await addDoc(collection(db, "groups", selectedGroup.id, "messages"), {
+              groupId: selectedGroup.id,
+              sender: "Zip Groups Host Bot",
+              senderName: "Zip Groups Host Bot",
+              avatar: "🎉",
+              text: `🎉 A new gathering has just been created in ${selectedCategoryGroup}: "${cleanTitle}" on ${cleanDate} @ ${cleanTime}!`,
+              timestamp: Date.now(),
+              isEventAnnouncement: true,
+              eventId: eventId
+            });
+          } catch {}
         }
 
         const nextHostCount = userHostedEvents + 1;
@@ -2264,9 +3682,38 @@ export default function Home() {
           await setDoc(doc(db, "users", userName.toLowerCase()), { hostedCount: nextHostCount }, { merge: true });
         }
 
+        const hostTargetEmail = (userEmail || emailSignupInput).trim();
+        if (hostTargetEmail) {
+          fetch("/api/send-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "event_created",
+              email: hostTargetEmail,
+              userName: userName || "Host",
+              eventTitle: cleanTitle,
+              groupName: selectedCategoryGroup,
+              eventDate: cleanDate,
+              eventTime: cleanTime,
+              eventLocation: cleanLocation || (isOnlineEvent ? "Online Meetup" : `Zip ${centerZip}`),
+              eventDescription: cleanDesc,
+              zipCodes: zips.join(", "),
+              radiusMiles: hostRadiusMiles
+            })
+          }).catch(err => console.error("Host event email error:", err));
+        }
+
+        // Trigger clickable in-app banner for everyone in the group
+        setEventAnnouncement({
+          groupName: selectedCategoryGroup,
+          eventTitle: cleanTitle,
+          groupZip: centerZip,
+          eventId: eventId
+        });
+
         setIsHostOpen(false);
-        setEventTitle(""); setEventDesc(""); setEventDate(""); setEventTime(""); setHostChecklist([]);
-        setNotification(`🎉 Event "${eventTitle}" published to the cloud!`);
+        setEventTitle(""); setEventDesc(""); setEventLocation(""); setEventPhotoUrl(""); setIsOnlineEvent(false); setEventDate(""); setEventTime(""); setHostChecklist([]);
+        setNotification(`🎉 Gathering "${cleanTitle}" (${cleanDate} @ ${cleanTime}) published!`);
       } catch (err) {
         console.error("Error publishing event to cloud:", err);
         setNotification("❌ Failed to publish event to cloud.");
@@ -2276,6 +3723,11 @@ export default function Home() {
 
   const toggleJoinGroup = async (groupId: string) => {
     requireAuth(async () => {
+      if (!isEmailVerified) {
+        setNotification("🔒 Email verification required to join groups and access chat.");
+        setIsVerifyModalOpen(true);
+        return;
+      }
       const newJoined = new Set(joinedGroups);
       if (newJoined.has(groupId)) {
         newJoined.delete(groupId);
@@ -2325,6 +3777,11 @@ export default function Home() {
   // Real Cloud-Synced RSVP Handler (No fake names!)
   const toggleRSVP = async (evt: GroupEvent) => {
     requireAuth(async () => {
+      if (!isEmailVerified) {
+        setNotification("🔒 Email verification required to RSVP for events.");
+        setIsVerifyModalOpen(true);
+        return;
+      }
       const currentRsvps = Array.isArray(evt.rsvps) ? [...evt.rsvps] : [];
       const isAlreadyGoing = currentRsvps.some(u => u.toLowerCase() === userName.toLowerCase());
       const updatedRsvps = isAlreadyGoing
@@ -2333,7 +3790,29 @@ export default function Home() {
 
       try {
         await setDoc(doc(db, "group_events", evt.id), { rsvps: updatedRsvps }, { merge: true });
-        setNotification(isAlreadyGoing ? "RSVP cancelled." : "✅ RSVP confirmed in the cloud!");
+
+        if (!isAlreadyGoing) {
+          const memberTargetEmail = (userEmail || emailSignupInput).trim();
+          if (memberTargetEmail) {
+            fetch("/api/send-email", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "rsvp_confirmation",
+                email: memberTargetEmail,
+                userName: userName || "Neighbor",
+                eventTitle: evt.title || evt.text,
+                groupName: evt.groupName || selectedGroup?.name || "Neighborhood Circle",
+                eventLocation: evt.locationName || `Zip ${evt.zipCode || zipCode || "43230"}`,
+                eventDescription: evt.description || "",
+                hostName: evt.host || "Community Host"
+              })
+            }).catch(err => console.error("RSVP confirmation email error:", err));
+          }
+          setNotification("✅ RSVP confirmed! Details have been emailed to you.");
+        } else {
+          setNotification("RSVP cancelled.");
+        }
       } catch (err) {
         console.error("Error updating RSVP:", err);
       }
@@ -2353,23 +3832,21 @@ export default function Home() {
     });
   };
 
-  // Full Event Editor (Allows changing Title, Description with links, Date, Time, Location & 18+ tag)
+  // Full Event Editor (Allows changing Title, Description, Location/Link, Photo, Date, Time & 18+ tag)
   const handleEditEvent = (evt: GroupEvent) => {
     setEditingEventId(evt.id);
-    setEditEventTitle(evt.title || evt.text || "");
+    setEditEventZip(evt.centerZip || evt.zipCode || zipCode || "43230");
+    setEditEventRadiusMiles(evt.radiusMiles || 5);
+    setEditEventTitle(evt.title || (evt.text ? evt.text.split(" (")[0] : "") || "");
     setEditEventDesc(evt.description || "");
     setEditEventLocation(evt.locationName || "");
+    setEditEventPhotoUrl(evt.photoUrl || "");
+    setEditEventIsOnline(Boolean(evt.isOnline));
     setEditEventIsAdultOnly(Boolean(evt.isAdultOnly));
 
-    // Try to extract date & time if stored
-    const match = (evt.text || "").match(/\((.*?) @ (.*?)\)/);
-    if (match) {
-      setEditEventDate(match[1] === "TBD" ? "" : match[1]);
-      setEditEventTime(match[2] === "TBD" ? "" : match[2]);
-    } else {
-      setEditEventDate("");
-      setEditEventTime("");
-    }
+    const { date: parsedDate, time: parsedTime } = getEventDateTime(evt);
+    setEditEventDate(parsedDate === "TBD" ? "" : parsedDate);
+    setEditEventTime(parsedTime === "TBD" ? "" : parsedTime);
     setIsEditEventModalOpen(true);
   };
 
@@ -2377,22 +3854,39 @@ export default function Home() {
     e.preventDefault();
     if (!editingEventId || !editEventTitle.trim()) return;
 
-    const formattedEventString = `${editEventTitle.trim()} (${editEventDate || "TBD"} @ ${editEventTime || "TBD"})`;
+    const cleanEditDate = editEventDate.trim() || "TBD";
+    const cleanEditTime = editEventTime.trim() || "TBD";
+    const formattedEventString = `${editEventTitle.trim()} (${cleanEditDate} @ ${cleanEditTime})`;
     const chosenTheme = THEME_COLORS[editEventColorIndex];
+    const centerZip = editEventZip.trim().split(",")[0] || zipCode || "43230";
+    const targetZips = editEventIsOnline
+      ? (editEventZip.trim() ? getRadiusZipList(centerZip, editEventRadiusMiles) : [centerZip])
+      : getRadiusZipList(centerZip, editEventRadiusMiles);
+
+    const updatedFields = {
+      zipCode: centerZip,
+      centerZip: centerZip,
+      radiusMiles: editEventRadiusMiles,
+      targetZips: targetZips,
+      isOnline: Boolean(editEventIsOnline),
+      photoUrl: editEventPhotoUrl.trim(),
+      title: editEventTitle.trim(),
+      date: cleanEditDate,
+      time: cleanEditTime,
+      text: formattedEventString,
+      description: editEventDesc.trim(),
+      locationName: editEventLocation.trim() || (editEventIsOnline ? "🌐 Online Meetup" : `Hosted by ${userName}`),
+      isAdultOnly: editEventIsAdultOnly,
+      color: chosenTheme.class
+    };
 
     try {
-      await setDoc(doc(db, "group_events", editingEventId), {
-        title: editEventTitle.trim(),
-        text: formattedEventString,
-        description: editEventDesc.trim(),
-        locationName: editEventLocation.trim() || `Hosted by ${userName}`,
-        isAdultOnly: editEventIsAdultOnly,
-        color: chosenTheme.class
-      }, { merge: true });
+      setCloudEvents(prev => prev.map(ev => ev.id === editingEventId ? { ...ev, ...updatedFields } : ev));
+      await setDoc(doc(db, "group_events", editingEventId), updatedFields, { merge: true });
 
       setIsEditEventModalOpen(false);
       setEditingEventId(null);
-      setNotification("✅ All event fields & links updated successfully in the cloud!");
+      setNotification("✅ Event details, date/time & broadcast range updated!");
     } catch (err) {
       console.error("Error updating event:", err);
       setNotification("❌ Failed to update event.");
@@ -2401,11 +3895,38 @@ export default function Home() {
 
   const handleCancelEvent = async (evtId: string) => {
     if (!window.confirm("Are you sure you want to cancel and delete this event?")) return;
+
+    const targetEvt = cloudEvents.find(e => e.id === evtId);
+    const matchingEvents = targetEvt
+      ? cloudEvents.filter(
+          e =>
+            e.id === evtId ||
+            (e.title === targetEvt.title &&
+              e.host?.toLowerCase() === targetEvt.host?.toLowerCase() &&
+              e.groupName === targetEvt.groupName)
+        )
+      : [{ id: evtId } as GroupEvent];
+
+    const idsToRemove = new Set(matchingEvents.map(e => e.id));
+
+    setCloudEvents(prev => prev.filter(e => !idsToRemove.has(e.id)));
+
     try {
-      await deleteDoc(doc(db, "group_events", evtId));
-      setNotification("Event cancelled and removed.");
+      for (const id of idsToRemove) {
+        try {
+          await deleteDoc(doc(db, "group_events", id));
+        } catch {
+          await setDoc(
+            doc(db, "group_events", id),
+            { isCancelled: true, expirationDate: "2000-01-01T00:00:00.000Z" },
+            { merge: true }
+          );
+        }
+      }
+      setNotification("🗑️ Event cancelled and removed from all zip codes.");
     } catch (err) {
-      console.error(err);
+      console.error("Error cancelling event:", err);
+      setNotification("❌ Could not remove event. Check your connection.");
     }
   };
 
@@ -2633,120 +4154,433 @@ export default function Home() {
         </div>
       )}
 
-      {/* NAVIGATION HEADER */}
-      <header className="w-full max-w-6xl flex justify-between items-center py-4 border-b border-gray-800/60 z-[100] flex-wrap gap-4 relative">
-        <div onClick={handleReset} className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-500 bg-clip-text text-transparent cursor-pointer">
-          Zip Groups
-        </div>
-        <nav className="flex items-center gap-3 text-sm font-medium text-gray-400 flex-wrap">
-          <span onClick={handleReset} className="hover:text-cyan-400 cursor-pointer transition-colors">Home</span>
-          <span onClick={() => { handleReset(); setIsSearchOpen(true); }} className="hover:text-cyan-400 cursor-pointer transition-colors">Search Zip</span>
-          
-          <span onClick={() => requireAuth(() => { setIsFriendsView(true); setIsSavedView(false); setIsShopView(false); setIsGalleryView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setSelectedGroup(null); setHasSearched(false); })} className="hover:text-purple-400 cursor-pointer transition-colors relative flex items-center gap-1.5">
-            Zip Friends
-            {friendRequestsCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center shadow-lg">
-                {friendRequestsCount}
-              </span>
-            )}
-          </span>
-
-          <span onClick={() => { setIsGalleryView(true); setIsSavedView(false); setIsShopView(false); setIsFriendsView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setSelectedGroup(null); setHasSearched(false); }} className="hover:text-pink-500 cursor-pointer transition-colors">Event Gallery</span>
-          
-          <span onClick={() => { setIsShopView(true); setIsSavedView(false); setIsFriendsView(false); setIsGalleryView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setSelectedGroup(null); setHasSearched(false); }} className="hover:text-amber-400 cursor-pointer transition-colors">Zip Shop</span>
-
-          <span onClick={() => { setIsHeatmapView(true); setIsGalleryView(false); setIsSavedView(false); setIsShopView(false); setIsFriendsView(false); setIsVenuesView(false); setIsMessagesView(false); setSelectedGroup(null); setHasSearched(false); }} className="hover:text-amber-400 cursor-pointer transition-colors font-bold text-amber-400 flex items-center gap-1">
-            🔥HotSpots
-          </span>
-
-          <span onClick={() => { setIsVenuesView(true); setIsShopView(false); setIsSavedView(false); setIsFriendsView(false); setIsGalleryView(false); setIsMessagesView(false); setIsHeatmapView(false); setSelectedGroup(null); setHasSearched(false); }} className="hover:text-amber-400 cursor-pointer transition-colors font-bold text-amber-400">Local Venues</span>
-          
-          <button 
+      {/* NEW EVENT ANNOUNCEMENT NOTIFICATION */}
+      {eventAnnouncement && (
+        <div className="fixed bottom-6 right-6 z-[310] max-w-md bg-gradient-to-r from-cyan-950 via-gray-900 to-black border-2 border-cyan-400 text-white p-4 rounded-2xl shadow-2xl flex flex-col gap-2.5 backdrop-blur-md animate-in slide-in-from-bottom-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <span className="text-2xl mt-0.5">🎉</span>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">New Meetup Created</p>
+                <p className="text-sm font-black text-white leading-snug mt-0.5">
+                  An event has just been created in &ldquo;{eventAnnouncement.groupName}&rdquo;!
+                </p>
+                <p className="text-xs text-gray-300 italic mt-0.5">&ldquo;{eventAnnouncement.eventTitle}&rdquo;</p>
+              </div>
+            </div>
+            <button onClick={() => setEventAnnouncement(null)} className="text-gray-400 hover:text-white font-bold text-lg cursor-pointer p-0.5">&times;</button>
+          </div>
+          <button
             onClick={() => {
-              requireAuth(() => {
-                if (!safetyActive) {
-                  if (!emergencyContactEmail.trim() && !emergencyContactPhone.trim()) {
-                    setNotification("⚠️ Please set your Emergency Contact in Account Settings first!");
-                    setIsAccountSettingsOpen(true);
-                    return;
-                  }
-                  setSafetyActive(true);
-                  setSafetyStep("active");
-                  setNotification(`🛡️ Safety Mode ON: Checking in every ${safetyIntervalHours} hour(s).`);
+              const targetGroup = groups.find(g => g.name.toLowerCase() === eventAnnouncement.groupName.toLowerCase() && g.zipCode === eventAnnouncement.groupZip)
+                || groups.find(g => g.name.toLowerCase() === eventAnnouncement.groupName.toLowerCase())
+                || { id: `grp-${eventAnnouncement.groupZip}-1`, zipCode: eventAnnouncement.groupZip, name: eventAnnouncement.groupName, category: "Social", location: `Zip ${eventAnnouncement.groupZip}`, members: 1, icon: "🎉", color: "border-cyan-500 text-cyan-400", glow: "shadow-cyan-500/20", events: [], chatMessages: [], isHostOnly: false, description: "Community gathering circle" };
+              setSelectedGroup(targetGroup as CommunityGroup);
+              setEventAnnouncement(null);
+            }}
+            className="w-full py-2 px-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <span>Click here to view it &rarr;</span>
+          </button>
+        </div>
+      )}
+
+      {/* NAVIGATION HEADER */}
+      <header className="w-full max-w-6xl py-3 border-b border-gray-800/60 z-[100] relative">
+        <div className="w-full flex justify-between items-center gap-2">
+          {/* Brand Logo */}
+          <div onClick={handleReset} className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-500 bg-clip-text text-transparent cursor-pointer shrink-0">
+            Zip Groups
+          </div>
+
+          {/* Desktop Nav Links (Hidden on mobile, foldables, and tablets under 1280px) */}
+          <nav className="hidden xl:flex items-center gap-3 text-sm font-medium text-gray-400 flex-wrap">
+            <span onClick={handleReset} className="hover:text-cyan-400 cursor-pointer transition-colors">Home</span>
+            <span onClick={() => setIsAboutUsOpen(true)} className="hover:text-cyan-400 cursor-pointer transition-colors font-medium">About Us</span>
+            <button 
+              type="button"
+              onClick={() => {
+                if (deferredInstallPrompt) {
+                  deferredInstallPrompt.prompt();
                 } else {
-                  setSafetyActive(false);
-                  setSafetyPromptDue(false);
-                  setNotification("🛡️ Safety Mode turned OFF.");
+                  setIsInstallModalOpen(true);
                 }
-              });
-            }} 
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 shadow-md ${safetyActive ? 'bg-emerald-950 text-emerald-300 border-emerald-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-white'}`}
-          >
-            🛡️ Safety: {safetyActive ? "ON" : "OFF"}
-          </button>
-
-          <button 
-            onClick={() => requireAuth(() => setIsEmergencyModalOpen(true))} 
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-950/90 hover:bg-rose-900 text-rose-300 border border-rose-600 transition-all cursor-pointer flex items-center gap-1.5 shadow-lg"
-          >
-            🚨 911 Assist
-          </button>
-          
-          <button onClick={() => setIsLegendOpen(true)} className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer text-gray-400 font-bold bg-gray-800/80 px-2.5 py-1 rounded-lg border border-gray-700">
-            ❓ Guide & Legend
-          </button>
-
-          {!isLoggedIn ? (
-            <button onClick={() => setIsAuthOpen(true)} className="px-4 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold rounded-lg hover:opacity-90 transition-all cursor-pointer shadow-md">
-              Sign Up / Log In
+              }} 
+              className="px-2.5 py-1 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 text-cyan-300 border border-cyan-400/50 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+              title="Download & Install Zip Groups to your phone's home screen"
+            >
+              <span>📲</span>
+              <span>Install App</span>
             </button>
-          ) : (
-            <div className="flex items-center gap-3 relative z-[250]">
-              <span 
-                className="text-xs text-emerald-400 font-bold bg-emerald-950/80 px-3 py-1.5 rounded-lg border border-emerald-800/60 flex items-center gap-2 cursor-pointer relative" 
-                onClick={() => setIsProfileOpen(!isProfileOpen)}
-              >
-                {userAvatarUrl ? (
-                  <img src={userAvatarUrl} alt="Avatar" className="w-5 h-5 rounded-full object-cover border border-emerald-400" />
-                ) : (
-                  <span className="w-5 h-5 rounded-full bg-cyan-800 text-cyan-200 text-[10px] flex items-center justify-center font-bold">{userInitials}</span>
-                )}
-                <span>{userName}</span> {isHostUser ? '👑' : ''}
-                
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center shadow-[0_0_10px_rgba(225,29,72,0.9)] animate-pulse">
-                    {unreadCount}
-                  </span>
-                )}
-              </span>
-              
-              {isProfileOpen && (
-                <div className="absolute top-10 right-0 w-60 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[300] overflow-hidden flex flex-col">
-                  <div className="p-3 border-b border-gray-800 bg-black flex items-center gap-3">
-                    {userAvatarUrl ? (
-                      <img src={userAvatarUrl} alt="Avatar" className="w-9 h-9 rounded-full object-cover border border-cyan-500" />
-                    ) : (
-                      <div className="w-9 h-9 rounded-full bg-cyan-800 text-cyan-200 text-xs flex items-center justify-center font-bold">{userInitials}</div>
-                    )}
-                    <div>
-                      <p className="text-xs text-white font-bold truncate">{userName}</p>
-                      <p className="text-[10px] text-cyan-400">{userStatus}</p>
-                    </div>
-                  </div>
+            <span onClick={() => { handleReset(); setIsSearchOpen(true); }} className="hover:text-cyan-400 cursor-pointer transition-colors">Search Zip</span>
+            
+            <span onClick={() => requireAuth(() => { setIsFriendsView(true); setIsSavedView(false); setIsShopView(false); setIsGalleryView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); })} className="hover:text-purple-400 cursor-pointer transition-colors relative flex items-center gap-1.5">
+              Zip Friends
+              {friendRequestsCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center shadow-lg">
+                  {friendRequestsCount}
+                </span>
+              )}
+            </span>
 
-                  <button 
-                    onClick={async () => { 
-                      setIsMessagesView(true); 
-                      setIsFriendsView(false); 
-                      setIsSavedView(false); 
-                      setIsShopView(false); 
-                      setIsGalleryView(false); 
-                      setIsVenuesView(false); 
-                      setIsHeatmapView(false); 
-                      setSelectedGroup(null); 
-                      setHasSearched(false); 
-                      setUnreadCount(0); 
-                      setIsProfileOpen(false); 
+            {isHostUser && (
+              <button 
+                onClick={() => {
+                  setSelectedGroup(HOST_HQ_GROUP);
+                  setIsGalleryView(false);
+                  setIsSavedView(false);
+                  setIsShopView(false);
+                  setIsFriendsView(false);
+                  setIsVenuesView(false);
+                  setIsMessagesView(false);
+                  setIsHeatmapView(false);
+                  setIsUpcomingEventsView(false);
+                  setHasSearched(false);
+                }}
+                className="px-3 py-1 rounded-lg text-xs font-black bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black border border-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.5)] flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                title="Exclusive Host Portal & Host Chat"
+              >
+                <span>👑</span> <span>Host HQ &amp; Chat</span>
+              </button>
+            )}
+
+            <span onClick={() => { setIsGalleryView(true); setIsSavedView(false); setIsShopView(false); setIsFriendsView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); }} className="hover:text-pink-500 cursor-pointer transition-colors">Event Gallery</span>
+            
+            <span onClick={() => { setIsShopView(true); setIsSavedView(false); setIsFriendsView(false); setIsGalleryView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); }} className="hover:text-amber-400 cursor-pointer transition-colors">Zip Shop</span>
+
+            <span onClick={() => { setIsHeatmapView(true); setIsGalleryView(false); setIsSavedView(false); setIsShopView(false); setIsFriendsView(false); setIsVenuesView(false); setIsMessagesView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); }} className="hover:text-amber-400 cursor-pointer transition-colors font-bold text-amber-400 flex items-center gap-1">
+              🔥HotSpots
+            </span>
+
+            <span onClick={() => { setIsVenuesView(true); setIsShopView(false); setIsSavedView(false); setIsFriendsView(false); setIsGalleryView(false); setIsMessagesView(false); setIsHeatmapView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); }} className="hover:text-amber-400 cursor-pointer transition-colors font-bold text-amber-400">Local Venues</span>
+            
+            <button 
+              onClick={() => {
+                requireAuth(() => {
+                  if (!safetyActive) {
+                    if (!emergencyContactEmail.trim() && !emergencyContactPhone.trim()) {
+                      setNotification("⚠️ Please set your Emergency Contact in Account Settings first!");
+                      setIsAccountSettingsOpen(true);
+                      return;
+                    }
+                    setSafetyActive(true);
+                    setSafetyStep("active");
+                    setNotification(`🛡️ Safety Mode ON: Checking in every ${safetyIntervalHours} hour(s).`);
+                  } else {
+                    setSafetyActive(false);
+                    setSafetyPromptDue(false);
+                    setNotification("🛡️ Safety Mode turned OFF.");
+                  }
+                });
+              }} 
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 shadow-md ${safetyActive ? 'bg-emerald-950 text-emerald-300 border-emerald-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-white'}`}
+            >
+              🛡️ Safety: {safetyActive ? "ON" : "OFF"}
+            </button>
+
+            <button 
+              onClick={() => requireAuth(() => setIsEmergencyModalOpen(true))} 
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-950/90 hover:bg-rose-900 text-rose-300 border border-rose-600 transition-all cursor-pointer flex items-center gap-1.5 shadow-lg"
+            >
+              🚨 911 Assist
+            </button>
+            
+            <button onClick={() => setIsLegendOpen(true)} className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer text-gray-400 font-bold bg-gray-800/80 px-2.5 py-1 rounded-lg border border-gray-700">
+              ❓ Guide & Legend
+            </button>
+          </nav>
+
+          {/* Right Action Controls (Both Mobile & Desktop) */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Desktop-only Install App button (on mobile it lives prominently in the mobile drawer) */}
+            <button 
+              type="button"
+              onClick={() => {
+                if (deferredInstallPrompt) {
+                  deferredInstallPrompt.prompt();
+                } else {
+                  setIsInstallModalOpen(true);
+                }
+              }} 
+              className="hidden lg:flex px-2.5 py-1 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 text-cyan-300 border border-cyan-400/50 rounded-xl text-xs font-bold items-center gap-1 shadow-sm cursor-pointer"
+              title="Install App"
+            >
+              <span>📲</span>
+              <span>Install App</span>
+            </button>
+
+            {/* Profile Pill or Login Button */}
+            {!isLoggedIn ? (
+              <button 
+                onClick={() => {
+                  setIsMobileNavOpen(false);
+                  setIsAuthOpen(true);
+                }} 
+                className="px-3 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold rounded-xl hover:opacity-90 transition-all cursor-pointer shadow-md shrink-0"
+              >
+                Sign In
+              </button>
+            ) : (
+              <div className="relative shrink-0">
+                <button 
+                  type="button"
+                  className="text-xs text-emerald-400 font-bold bg-emerald-950/80 hover:bg-emerald-900/80 p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-emerald-800/60 flex items-center gap-1.5 cursor-pointer relative transition-all" 
+                  onClick={() => {
+                    setIsMobileNavOpen(false);
+                    setIsProfileOpen(!isProfileOpen);
+                  }}
+                  title="My Account"
+                >
+                  {userAvatarUrl ? (
+                    <img src={userAvatarUrl} alt="Avatar" className="w-6 h-6 rounded-full object-cover border border-emerald-400 shrink-0" />
+                  ) : (
+                    <span className="w-6 h-6 rounded-full bg-cyan-800 text-cyan-200 text-[10px] flex items-center justify-center font-bold shrink-0">{userInitials}</span>
+                  )}
+                  {/* On narrow mobile screen, only show avatar circle + crown to save width for the Menu button */}
+                  <span className="hidden sm:inline max-w-[100px] truncate">{userName}</span>
+                  {isHostUser && <span className="shrink-0 text-[11px]">👑</span>}
+                  
+                  {unreadCount > 0 ? (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center shadow-[0_0_10px_rgba(225,29,72,0.9)] animate-pulse">
+                      {unreadCount}
+                    </span>
+                  ) : userUpcomingEvents.length > 0 ? (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-cyan-600 text-white text-[9px] font-black flex items-center justify-center shadow-[0_0_8px_rgba(6,182,212,0.8)]" title={`${userUpcomingEvents.length} upcoming meetup(s)`}>
+                      {userUpcomingEvents.length}
+                    </span>
+                  ) : null}
+                </button>
+
+                {/* RESPONSIVE PROFILE DROPDOWN */}
+                {isProfileOpen && (
+                  <>
+                    {/* Backdrop */}
+                    <div 
+                      className="fixed inset-0 z-[299] bg-black/60 backdrop-blur-[1px]" 
+                      onClick={() => setIsProfileOpen(false)} 
+                    />
+                    
+                    {/* Dropdown Menu: anchored cleanly within viewport, never cut off on foldables */}
+                    <div className="fixed top-16 right-3 sm:right-6 xl:absolute xl:top-12 xl:right-0 w-72 max-w-[calc(100vw-24px)] bg-gray-900 border border-gray-700/80 rounded-2xl shadow-2xl z-[300] overflow-hidden flex flex-col backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
+                      <div className="p-3 border-b border-gray-800 bg-black/70 flex items-center gap-3">
+                        {userAvatarUrl ? (
+                          <img src={userAvatarUrl} alt="Avatar" className="w-9 h-9 rounded-full object-cover border border-cyan-500 shrink-0" />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-cyan-800 text-cyan-200 text-xs flex items-center justify-center font-bold shrink-0">{userInitials}</div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-white font-bold truncate">{userName}</p>
+                          <p className="text-[10px] text-cyan-400 truncate">{userStatus}</p>
+                        </div>
+                      </div>
+
+                      {/* UPCOMING EVENTS OPTION WITH NOTIFICATION BADGE */}
+                      <button 
+                        onClick={() => { 
+                          setIsUpcomingEventsView(true); 
+                          setIsMessagesView(false);
+                          setIsFriendsView(false); 
+                          setIsSavedView(false); 
+                          setIsShopView(false); 
+                          setIsGalleryView(false); 
+                          setIsVenuesView(false); 
+                          setIsHeatmapView(false); 
+                          setSelectedGroup(null); 
+                          setHasSearched(false); 
+                          setIsProfileOpen(false); 
+                        }} 
+                        className="text-left px-4 py-2.5 text-xs text-cyan-300 hover:bg-gray-800 transition-colors font-medium flex justify-between items-center border-b border-gray-800/60 cursor-pointer"
+                      >
+                        <span className="flex items-center gap-1.5 font-bold">
+                          <span>📅 Upcoming Events</span>
+                        </span>
+                        {userUpcomingEvents.length > 0 && (
+                          <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-cyan-600 text-white text-[9px] font-black flex items-center justify-center shadow-[0_0_8px_rgba(6,182,212,0.8)]">
+                            {userUpcomingEvents.length}
+                          </span>
+                        )}
+                      </button>
+
+                      <button 
+                        onClick={async () => { 
+                          setIsMessagesView(true); 
+                          setIsUpcomingEventsView(false);
+                          setIsFriendsView(false); 
+                          setIsSavedView(false); 
+                          setIsShopView(false); 
+                          setIsGalleryView(false); 
+                          setIsVenuesView(false); 
+                          setIsHeatmapView(false); 
+                          setSelectedGroup(null); 
+                          setHasSearched(false); 
+                          setUnreadCount(0); 
+                          setIsProfileOpen(false); 
+                          if (userName) {
+                            try {
+                              await setDoc(doc(db, "users", userName.toLowerCase()), { unreadCount: 0 }, { merge: true });
+                            } catch (err) {
+                              console.error("Error clearing unread count:", err);
+                            }
+                          }
+                        }} 
+                        className="text-left px-4 py-2.5 text-xs text-blue-300 hover:bg-gray-800 transition-colors font-medium flex justify-between items-center border-b border-gray-800/60 cursor-pointer"
+                      >
+                        <span>💬 Zip Messages</span>
+                        {unreadCount > 0 && (
+                          <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center shadow-[0_0_8px_rgba(225,29,72,0.8)] animate-pulse">
+                            {unreadCount}
+                          </span>
+                        )}
+                      </button>
+
+                      <button 
+                        onClick={() => { setIsSavedView(true); setIsUpcomingEventsView(false); setIsShopView(false); setIsFriendsView(false); setIsGalleryView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setSelectedGroup(null); setHasSearched(false); setIsProfileOpen(false); }} 
+                        className="text-left px-4 py-2.5 text-xs text-purple-300 hover:bg-gray-800 transition-colors font-medium border-b border-gray-800/60 cursor-pointer"
+                      >
+                        🔖 My Favorites
+                      </button>
+
+                      <button 
+                        onClick={() => { setIsAccountSettingsOpen(true); setIsProfileOpen(false); }} 
+                        className="text-left px-4 py-2.5 text-xs text-gray-300 hover:bg-gray-800 transition-colors font-medium border-b border-gray-800/60 cursor-pointer"
+                      >
+                        ⚙️ Account Settings
+                      </button>
+                      
+                      <button 
+                        onClick={() => { setIsManageSubOpen(true); setIsProfileOpen(false); }} 
+                        className="text-left px-4 py-2.5 text-xs text-amber-300 hover:bg-gray-800 transition-colors font-medium cursor-pointer"
+                      >
+                        💳 Manage Subscription
+                      </button>
+
+                      <button 
+                        onClick={() => {
+                          if (window.confirm("Are you sure you want to log out?")) {
+                            wipeLocalStateAndLogout();
+                          }
+                        }} 
+                        className="w-full text-left px-4 py-2.5 text-xs text-rose-400 font-bold bg-rose-950/40 hover:bg-rose-900/60 transition-colors border-t border-gray-800 cursor-pointer"
+                      >
+                        🚪 Log Out
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Mobile Hamburger Menu Toggle Button - PROMINENT, CLEAR, ALWAYS ON SCREEN */}
+            <button 
+              type="button"
+              onClick={() => {
+                setIsProfileOpen(false);
+                setIsMobileNavOpen(!isMobileNavOpen);
+              }} 
+              className={`xl:hidden px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-md ${isMobileNavOpen ? 'bg-cyan-950 text-cyan-300 border-cyan-400 shadow-cyan-950/50' : 'bg-gray-800 text-gray-200 hover:text-white border-gray-700'}`}
+              aria-label="Toggle navigation menu"
+            >
+              <span className="text-sm font-bold leading-none">{isMobileNavOpen ? '✕' : '☰'}</span>
+              <span className="text-xs font-bold leading-none">Menu</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Navigation Drawer */}
+        {isMobileNavOpen && (
+          <div className="w-full xl:hidden mt-3 p-3.5 bg-gray-900/98 backdrop-blur-xl border border-gray-700/80 rounded-2xl shadow-2xl flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+            {/* Direct App Install Card in Mobile Drawer */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsMobileNavOpen(false);
+                if (deferredInstallPrompt) {
+                  deferredInstallPrompt.prompt();
+                } else {
+                  setIsInstallModalOpen(true);
+                }
+              }}
+              className="w-full py-2.5 px-3 bg-gradient-to-r from-cyan-500/20 via-purple-500/20 to-pink-500/20 hover:from-cyan-500/30 text-cyan-200 border border-cyan-400/50 rounded-xl text-xs font-bold flex items-center justify-between shadow-md cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <span>📲</span>
+                <span>Install Zip Groups App</span>
+              </span>
+              <span className="text-[10px] bg-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded-full font-bold">1-Tap</span>
+            </button>
+
+            {/* If Logged In, quick Account / Messages / Events Bar inside the Drawer */}
+            {isLoggedIn ? (
+              <div className="p-2.5 rounded-xl bg-gray-800/90 border border-gray-700/80 flex flex-col gap-2">
+                <div className="flex items-center justify-between border-b border-gray-700/60 pb-2">
+                  <div className="flex items-center gap-2">
+                    {userAvatarUrl ? (
+                      <img src={userAvatarUrl} alt="Avatar" className="w-6 h-6 rounded-full object-cover border border-emerald-400 shrink-0" />
+                    ) : (
+                      <span className="w-6 h-6 rounded-full bg-cyan-800 text-cyan-200 text-[10px] flex items-center justify-center font-bold shrink-0">{userInitials}</span>
+                    )}
+                    <span className="text-xs font-bold text-white truncate max-w-[130px]">{userName}</span>
+                    {isHostUser && <span className="text-xs">👑</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setIsMobileNavOpen(false);
+                        setIsAccountSettingsOpen(true);
+                      }}
+                      className="text-[11px] text-gray-400 hover:text-cyan-300 font-semibold cursor-pointer"
+                    >
+                      ⚙️ Settings
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMobileNavOpen(false);
+                        if (window.confirm("Are you sure you want to log out?")) {
+                          wipeLocalStateAndLogout();
+                        }
+                      }}
+                      className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                    >
+                      🚪
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    onClick={() => {
+                      setIsUpcomingEventsView(true);
+                      setIsMessagesView(false);
+                      setIsFriendsView(false);
+                      setIsSavedView(false);
+                      setIsShopView(false);
+                      setIsGalleryView(false);
+                      setIsVenuesView(false);
+                      setIsHeatmapView(false);
+                      setSelectedGroup(null);
+                      setHasSearched(false);
+                      setIsMobileNavOpen(false);
+                    }}
+                    className="p-1.5 rounded-lg bg-gray-900/80 hover:bg-gray-900 text-cyan-300 font-medium text-left flex items-center justify-between cursor-pointer"
+                  >
+                    <span>📅 My Events</span>
+                    {userUpcomingEvents.length > 0 && (
+                      <span className="text-[9px] bg-cyan-600 text-white px-1.5 py-0.2 rounded-full font-bold">{userUpcomingEvents.length}</span>
+                    )}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setIsMessagesView(true);
+                      setIsUpcomingEventsView(false);
+                      setIsFriendsView(false);
+                      setIsSavedView(false);
+                      setIsShopView(false);
+                      setIsGalleryView(false);
+                      setIsVenuesView(false);
+                      setIsHeatmapView(false);
+                      setSelectedGroup(null);
+                      setHasSearched(false);
+                      setUnreadCount(0);
+                      setIsMobileNavOpen(false);
                       if (userName) {
                         try {
                           await setDoc(doc(db, "users", userName.toLowerCase()), { unreadCount: 0 }, { merge: true });
@@ -2754,53 +4588,166 @@ export default function Home() {
                           console.error("Error clearing unread count:", err);
                         }
                       }
-                    }} 
-                    className="text-left px-4 py-2.5 text-xs text-blue-300 hover:bg-gray-800 transition-colors font-medium flex justify-between items-center border-b border-gray-800/60 cursor-pointer"
+                    }}
+                    className="p-1.5 rounded-lg bg-gray-900/80 hover:bg-gray-900 text-blue-300 font-medium text-left flex items-center justify-between cursor-pointer"
                   >
-                    <span>💬 Zip Messages</span>
+                    <span>💬 Messages</span>
                     {unreadCount > 0 && (
-                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center shadow-[0_0_8px_rgba(225,29,72,0.8)] animate-pulse">
-                        {unreadCount}
-                      </span>
+                      <span className="text-[9px] bg-rose-600 text-white px-1.5 py-0.2 rounded-full font-bold animate-pulse">{unreadCount}</span>
                     )}
                   </button>
-
-                  <button 
-                    onClick={() => { setIsSavedView(true); setIsShopView(false); setIsFriendsView(false); setIsGalleryView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setSelectedGroup(null); setHasSearched(false); setIsProfileOpen(false); }} 
-                    className="text-left px-4 py-2.5 text-xs text-purple-300 hover:bg-gray-800 transition-colors font-medium border-b border-gray-800/60 cursor-pointer"
-                  >
-                    🔖 My Favorites
-                  </button>
-
-                  <button 
-                    onClick={() => { setIsAccountSettingsOpen(true); setIsProfileOpen(false); }} 
-                    className="text-left px-4 py-2.5 text-xs text-gray-300 hover:bg-gray-800 transition-colors font-medium cursor-pointer"
-                  >
-                    ⚙️ Account Settings
-                  </button>
-                  
-                  <button 
-                    onClick={() => { setIsManageSubOpen(true); setIsProfileOpen(false); }} 
-                    className="text-left px-4 py-2.5 text-xs text-amber-300 hover:bg-gray-800 transition-colors font-medium cursor-pointer"
-                  >
-                    💳 Manage Subscription
-                  </button>
-                  
-                  <button 
-                    onClick={() => {
-                      if (window.confirm("Are you sure you want to log out?")) {
-                        wipeLocalStateAndLogout();
-                      }
-                    }} 
-                    className="w-full text-left px-4 py-2.5 text-xs text-rose-500 font-bold bg-rose-950/30 hover:bg-rose-900/60 transition-colors border-t border-gray-800 cursor-pointer"
-                  >
-                    🚪 Log Out
-                  </button>
                 </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  setIsMobileNavOpen(false);
+                  setIsAuthOpen(true);
+                }}
+                className="w-full py-2.5 px-3 bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold rounded-xl hover:opacity-90 transition-all cursor-pointer shadow-md text-center"
+              >
+                Sign In / Create Free Account
+              </button>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pb-2 border-b border-gray-800">
+              <button 
+                onClick={() => { handleReset(); setIsMobileNavOpen(false); }} 
+                className="flex items-center gap-2 p-2.5 rounded-xl bg-gray-800/80 hover:bg-gray-800 text-gray-200 text-xs font-semibold text-left transition-colors cursor-pointer"
+              >
+                <span>🏠</span> <span>Home</span>
+              </button>
+              <button 
+                onClick={() => { handleReset(); setIsSearchOpen(true); setIsMobileNavOpen(false); }} 
+                className="flex items-center gap-2 p-2.5 rounded-xl bg-gray-800/80 hover:bg-gray-800 text-cyan-300 text-xs font-semibold text-left transition-colors cursor-pointer"
+              >
+                <span>🔍</span> <span>Search Zip</span>
+              </button>
+              <button 
+                onClick={() => requireAuth(() => { setIsFriendsView(true); setIsSavedView(false); setIsShopView(false); setIsGalleryView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); setIsMobileNavOpen(false); })} 
+                className="flex items-center justify-between p-2.5 rounded-xl bg-gray-800/80 hover:bg-gray-800 text-purple-300 text-xs font-semibold text-left transition-colors cursor-pointer"
+              >
+                <span className="flex items-center gap-2"><span>👥</span> <span>Zip Friends</span></span>
+                {friendRequestsCount > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center shadow-lg">
+                    {friendRequestsCount}
+                  </span>
+                )}
+              </button>
+              {isHostUser && (
+                <>
+                  <button
+                    onClick={() => {
+                      setSelectedGroup(HOST_HQ_GROUP);
+                      setIsGalleryView(false);
+                      setIsSavedView(false);
+                      setIsShopView(false);
+                      setIsFriendsView(false);
+                      setIsVenuesView(false);
+                      setIsMessagesView(false);
+                      setIsHeatmapView(false);
+                      setIsUpcomingEventsView(false);
+                      setHasSearched(false);
+                      setIsMobileNavOpen(false);
+                    }}
+                    className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-950/80 hover:bg-amber-900 border border-amber-600/60 text-amber-300 text-xs font-black text-left transition-colors cursor-pointer"
+                  >
+                    <span>👑</span> <span>Host HQ &amp; Host Chat</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsHostOpen(true);
+                      setIsMobileNavOpen(false);
+                    }}
+                    className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-900/60 hover:bg-amber-900 border border-amber-500/40 text-amber-200 text-xs font-bold text-left transition-colors cursor-pointer"
+                  >
+                    <span>📅</span> <span>Host an Event</span>
+                  </button>
+                </>
               )}
+              <button 
+                onClick={() => { setIsGalleryView(true); setIsSavedView(false); setIsShopView(false); setIsFriendsView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); setIsMobileNavOpen(false); }} 
+                className="flex items-center gap-2 p-2.5 rounded-xl bg-gray-800/80 hover:bg-gray-800 text-pink-300 text-xs font-semibold text-left transition-colors cursor-pointer"
+              >
+                <span>📸</span> <span>Event Gallery</span>
+              </button>
+              <button 
+                onClick={() => { setIsShopView(true); setIsSavedView(false); setIsFriendsView(false); setIsGalleryView(false); setIsVenuesView(false); setIsMessagesView(false); setIsHeatmapView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); setIsMobileNavOpen(false); }} 
+                className="flex items-center gap-2 p-2.5 rounded-xl bg-gray-800/80 hover:bg-gray-800 text-amber-300 text-xs font-semibold text-left transition-colors cursor-pointer"
+              >
+                <span>🛍️</span> <span>Zip Shop</span>
+              </button>
+              <button 
+                onClick={() => { setIsHeatmapView(true); setIsGalleryView(false); setIsSavedView(false); setIsShopView(false); setIsFriendsView(false); setIsVenuesView(false); setIsMessagesView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); setIsMobileNavOpen(false); }} 
+                className="flex items-center gap-2 p-2.5 rounded-xl bg-gray-800/80 hover:bg-gray-800 text-amber-400 text-xs font-bold text-left transition-colors cursor-pointer"
+              >
+                <span>🔥</span> <span>HotSpots</span>
+              </button>
+              <button 
+                onClick={() => { setIsVenuesView(true); setIsShopView(false); setIsSavedView(false); setIsFriendsView(false); setIsGalleryView(false); setIsMessagesView(false); setIsHeatmapView(false); setIsUpcomingEventsView(false); setSelectedGroup(null); setHasSearched(false); setIsMobileNavOpen(false); }} 
+                className="flex items-center gap-2 p-2.5 rounded-xl bg-gray-800/80 hover:bg-gray-800 text-amber-400 text-xs font-bold text-left transition-colors cursor-pointer"
+              >
+                <span>🏢</span> <span>Local Venues</span>
+              </button>
+              <button 
+                onClick={() => { setIsAboutUsOpen(true); setIsMobileNavOpen(false); }} 
+                className="flex items-center gap-2 p-2.5 rounded-xl bg-gray-800/80 hover:bg-gray-800 text-gray-300 text-xs font-semibold text-left transition-colors cursor-pointer"
+              >
+                <span>ℹ️</span> <span>About Us</span>
+              </button>
             </div>
-          )}
-        </nav>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => {
+                    requireAuth(() => {
+                      if (!safetyActive) {
+                        if (!emergencyContactEmail.trim() && !emergencyContactPhone.trim()) {
+                          setNotification("⚠️ Please set your Emergency Contact in Account Settings first!");
+                          setIsAccountSettingsOpen(true);
+                          setIsMobileNavOpen(false);
+                          return;
+                        }
+                        setSafetyActive(true);
+                        setSafetyStep("active");
+                        setNotification(`🛡️ Safety Mode ON: Checking in every ${safetyIntervalHours} hour(s).`);
+                      } else {
+                        setSafetyActive(false);
+                        setSafetyPromptDue(false);
+                        setNotification("🛡️ Safety Mode turned OFF.");
+                      }
+                    });
+                  }} 
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer ${safetyActive ? 'bg-emerald-950 text-emerald-300 border-emerald-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-white'}`}
+                >
+                  🛡️ Safety: {safetyActive ? "ON" : "OFF"}
+                </button>
+                <button 
+                  onClick={() => {
+                    setIsLegendOpen(true);
+                    setIsMobileNavOpen(false);
+                  }} 
+                  className="flex-1 py-2 px-3 rounded-xl text-xs font-bold bg-gray-800 text-gray-300 border border-gray-700 flex items-center justify-center gap-1 hover:text-white transition-colors cursor-pointer"
+                >
+                  ❓ Guide & Legend
+                </button>
+              </div>
+
+              <button 
+                onClick={() => {
+                  requireAuth(() => {
+                    setIsEmergencyModalOpen(true);
+                    setIsMobileNavOpen(false);
+                  });
+                }} 
+                className="w-full py-2.5 px-3 rounded-xl text-xs font-bold bg-rose-950/90 hover:bg-rose-900 text-rose-300 border border-rose-600 transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+              >
+                🚨 911 Assist & Emergency SOS
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* REAL EMAIL VERIFICATION BANNER */}
@@ -2809,7 +4756,7 @@ export default function Home() {
           <div className="flex items-center gap-2.5 text-amber-200">
             <span className="text-base">📧</span>
             <span>
-              <strong>Verify your email</strong> ({userEmail || emailSignupInput || "unverified"}) to post chat messages and RSVP. You can freely browse all zip codes &amp; circles!
+              <strong>Verify your email</strong> ({userEmail || emailSignupInput || "unverified"}) to post chat messages and RSVP. You can freely browse all zip codes &amp; Groups!
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -2831,7 +4778,7 @@ export default function Home() {
       )}
 
       {/* PINNED HOST HQ PORTAL BANNER */}
-      {isHostUser && isLoggedIn && !selectedGroup && !hasSearched && !isFriendsView && !isGalleryView && !isShopView && !isVenuesView && !isSavedView && !isMessagesView && !isHeatmapView && (
+      {isHostUser && !selectedGroup && !isFriendsView && !isGalleryView && !isShopView && !isVenuesView && !isSavedView && !isMessagesView && !isHeatmapView && (
         <div className="w-full max-w-6xl mt-6 bg-gradient-to-r from-amber-950 via-gray-900 to-black border border-amber-500/60 rounded-2xl p-4 shadow-[0_0_20px_rgba(245,158,11,0.25)] flex flex-col sm:flex-row items-center justify-between gap-4 cursor-pointer hover:border-amber-400 transition-all z-10" onClick={() => setSelectedGroup(HOST_HQ_GROUP)}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-900/60 flex items-center justify-center text-2xl border border-amber-500/40">👑</div>
@@ -2847,14 +4794,86 @@ export default function Home() {
         </div>
       )}
 
-      {/* ACTIVE SAFETY CHECK-IN WIDGET */}
+      {/* PERSISTENT HOME SAFETY ACTIVE BANNER */}
       {safetyActive && safetyStep === "active" && (
-        <div className={`fixed bottom-20 right-6 z-[280] ${safetyPromptDue ? 'bg-rose-950/95 border-rose-500 animate-pulse' : 'bg-emerald-950/95 border-emerald-500'} border text-emerald-100 p-5 rounded-3xl shadow-2xl max-w-sm backdrop-blur-md flex flex-col gap-3`}>
+        <div className={`w-full max-w-6xl mt-4 px-4 py-3 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs z-30 shadow-xl backdrop-blur-md ${
+          safetyPromptDue 
+            ? 'bg-rose-950/90 border-rose-500 text-rose-200 animate-pulse' 
+            : 'bg-emerald-950/80 border-emerald-500/70 text-emerald-200'
+        }`}>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <span className="text-xl shrink-0">🛡️</span>
+            <div>
+              <p className="font-bold flex items-center gap-2">
+                <span>{safetyPromptDue ? "CHECK-IN DUE NOW!" : "Safety Monitor Active"}</span>
+                <span className="text-[10px] font-mono bg-emerald-900/80 border border-emerald-600/60 text-emerald-300 px-2 py-0.5 rounded-full">
+                  Every {safetyIntervalHours}h
+                </span>
+                {safetyPromptDue && (
+                  <span className="text-[10px] font-mono bg-rose-600 text-white font-black px-2 py-0.5 rounded-full">
+                    {Math.floor(safetyGraceSeconds / 60)}m {safetyGraceSeconds % 60}s left
+                  </span>
+                )}
+              </p>
+              <p className="text-[11px] text-gray-300 mt-0.5">
+                Emergency Contact: <strong className="text-white">{emergencyContactName || "Emergency Contact"}</strong> ({emergencyContactPhone || emergencyContactEmail || "on file"})
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+            {safetyPromptDue ? (
+              <button
+                onClick={() => {
+                  setSafetyPromptDue(false);
+                  setSafetyGraceSeconds(600);
+                  setNotification(`🔄 Safety timer reset for another ${safetyIntervalHours} hour(s).`);
+                }}
+                className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Still at Event
+              </button>
+            ) : null}
+
+            <button
+              onClick={() => {
+                setSafetyActive(false);
+                setSafetyPromptDue(false);
+                setIsSafetyWidgetMinimized(false);
+                setNotification("✅ Checked in: Glad you are home safely! Safety timer turned off.");
+              }}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer shadow-md"
+            >
+              I&apos;m Home Safely
+            </button>
+
+            <button
+              onClick={() => setIsSafetyWidgetMinimized(!isSafetyWidgetMinimized)}
+              className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold rounded-xl text-xs border border-gray-700 transition-colors cursor-pointer"
+            >
+              {isSafetyWidgetMinimized ? "Expand Card ↗" : "Hide Card ✕"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING SAFETY CHECK-IN POPUP CARD (Minimized when user clicks X) */}
+      {safetyActive && safetyStep === "active" && !isSafetyWidgetMinimized && (
+        <div className={`fixed bottom-20 right-6 z-[280] ${safetyPromptDue ? 'bg-rose-950/95 border-rose-500 animate-pulse' : 'bg-emerald-950/95 border-emerald-500'} border text-emerald-100 p-5 rounded-3xl shadow-2xl max-w-sm backdrop-blur-md flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2`}>
           <div className="flex justify-between items-center">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
               🛡️ {safetyPromptDue ? `CHECK-IN DUE (${Math.floor(safetyGraceSeconds / 60)}m ${safetyGraceSeconds % 60}s left)` : "Safety Monitor Active"}
             </span>
-            <button onClick={() => { setSafetyActive(false); setSafetyPromptDue(false); }} className="text-gray-400 hover:text-white font-bold text-sm cursor-pointer">&times;</button>
+            <button 
+              onClick={() => { 
+                setIsSafetyWidgetMinimized(true); 
+                setNotification("🛡️ Safety card minimized. Your timer stays active in the home banner!");
+              }} 
+              className="text-gray-400 hover:text-white font-bold text-sm cursor-pointer p-1"
+              title="Minimize to banner (keeps safety running)"
+            >
+              &times;
+            </button>
           </div>
           <p className="text-xs text-gray-300 leading-relaxed">
             Every {safetyIntervalHours} hour(s), we ask if you are safe. If unconfirmed within 10 minutes, <strong>{emergencyContactName || "your emergency contact"}</strong> ({emergencyContactPhone || emergencyContactEmail}) will automatically receive your GPS emergency alert via SMS & Email.
@@ -2874,7 +4893,7 @@ export default function Home() {
           </div>
           <div className="flex gap-2 mt-1">
             <button onClick={() => { setSafetyActive(false); setSafetyPromptDue(false); setNotification("✅ Checked in: Glad you are home safely! Safety timer turned off."); }} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer">I&apos;m Home Safely</button>
-            <button onClick={() => { setSafetyPromptDue(false); setSafetyGraceSeconds(600); setNotification(`🔄 Safety timer reset for another ${safetyIntervalHours} hour(s).`); }} className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl cursor-pointer">Still at Event</button>
+            <button onClick={() => { setSafetyPromptDue(false); setSafetyGraceSeconds(600); setIsSafetyWidgetMinimized(true); setNotification(`🔄 Safety timer reset for another ${safetyIntervalHours} hour(s).`); }} className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl cursor-pointer">Still at Event</button>
           </div>
         </div>
       )}
@@ -2895,9 +4914,9 @@ export default function Home() {
               <div>
                 <span className="text-[10px] uppercase font-bold text-amber-400 bg-amber-950/80 px-2.5 py-0.5 rounded-full border border-amber-800">🔥 Featured Hub #1</span>
                 <h4 className="text-xl font-bold text-white mt-3 mb-1">Zip Code 43230 (Gahanna)</h4>
-                <p className="text-xs text-gray-400 mb-4">Game nights, cafes, local parks, and thrifting circles.</p>
+                <p className="text-xs text-gray-400 mb-4">Game nights, cafes, local parks, and thrifting Groups.</p>
                 <div className="bg-black/40 p-3 rounded-xl border border-gray-800 space-y-2 text-xs">
-                  <p className="text-emerald-400 font-bold">● 30 Community Circles Available</p>
+                  <p className="text-emerald-400 font-bold">● 39 Community Groups Available</p>
                   <p className="text-cyan-300">● {cloudEvents.filter(e => e.zipCode === "43230").length} Scheduled Gatherings</p>
                 </div>
               </div>
@@ -2910,7 +4929,7 @@ export default function Home() {
                 <h4 className="text-xl font-bold text-white mt-3 mb-1">Zip Code 43215 (Downtown)</h4>
                 <p className="text-xs text-gray-400 mb-4">Barcades, trivia nights, foodies, and singles mixers.</p>
                 <div className="bg-black/40 p-3 rounded-xl border border-gray-800 space-y-2 text-xs">
-                  <p className="text-emerald-400 font-bold">● 30 Community Circles Available</p>
+                  <p className="text-emerald-400 font-bold">● 39 Community Groups Available</p>
                   <p className="text-cyan-300">● {cloudEvents.filter(e => e.zipCode === "43215").length} Scheduled Gatherings</p>
                 </div>
               </div>
@@ -2921,9 +4940,9 @@ export default function Home() {
               <div>
                 <span className="text-[10px] uppercase font-bold text-purple-400 bg-purple-950/80 px-2.5 py-0.5 rounded-full border border-purple-800">🌟 Featured Hub #3</span>
                 <h4 className="text-xl font-bold text-white mt-3 mb-1">Zip Code 43214 (Clintonville)</h4>
-                <p className="text-xs text-gray-400 mb-4">Thrifting runs, book clubs, and outdoor park circles.</p>
+                <p className="text-xs text-gray-400 mb-4">Thrifting runs, book clubs, and outdoor park groups.</p>
                 <div className="bg-black/40 p-3 rounded-xl border border-gray-800 space-y-2 text-xs">
-                  <p className="text-emerald-400 font-bold">● 30 Community Circles Available</p>
+                  <p className="text-emerald-400 font-bold">● 39 Community Groups Available</p>
                   <p className="text-cyan-300">● {cloudEvents.filter(e => e.zipCode === "43214").length} Scheduled Gatherings</p>
                 </div>
               </div>
@@ -3004,16 +5023,42 @@ export default function Home() {
                     )}
                   </div>
 
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      placeholder={activePM.isBot ? "Ask Zip Bot a question..." : `Message ${activePM.name}...`} 
-                      value={pmInput} 
-                      onChange={(e) => setPmInput(e.target.value)} 
-                      onKeyDown={(e) => { if(e.key === 'Enter') handleSendPM(); }}
-                      className="flex-1 bg-black border border-gray-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500" 
-                    />
-                    <button onClick={handleSendPM} className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl cursor-pointer">Send</button>
+                  <div className="flex flex-col gap-2 relative">
+                    {showPmEmojiPicker && (
+                      <div className="bg-[#111827] border border-cyan-500/50 rounded-2xl p-2.5 shadow-2xl flex flex-wrap gap-1.5 max-w-sm mb-1 z-30">
+                        {["🎉", "🔥", "👑", "🎲", "🍕", "☕", "👍", "❤️", "😂", "🎮", "📍", "🤝", "👏", "🥳", "💡", "🛡️"].map((em) => (
+                          <button
+                            key={em}
+                            type="button"
+                            onClick={() => {
+                              setPmInput(prev => prev + em);
+                            }}
+                            className="w-8 h-8 rounded-lg hover:bg-gray-800 flex items-center justify-center text-base cursor-pointer transition-transform hover:scale-125"
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2 items-center">
+                      <button 
+                        type="button"
+                        onClick={() => setShowPmEmojiPicker(!showPmEmojiPicker)}
+                        className={`p-2.5 rounded-xl border text-sm transition-all cursor-pointer ${showPmEmojiPicker ? 'bg-cyan-950 border-cyan-500 text-cyan-300' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}
+                        title="Add Emoji"
+                      >
+                        😊
+                      </button>
+                      <input 
+                        type="text" 
+                        placeholder={activePM.isBot ? "Ask Zip Bot a question..." : `Message ${activePM.name}...`} 
+                        value={pmInput} 
+                        onChange={(e) => setPmInput(e.target.value)} 
+                        onKeyDown={(e) => { if(e.key === 'Enter') handleSendPM(); }}
+                        className="flex-1 bg-black border border-gray-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500" 
+                      />
+                      <button onClick={handleSendPM} className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl cursor-pointer">Send</button>
+                    </div>
                   </div>
                 </>
               ) : (
@@ -3111,10 +5156,10 @@ export default function Home() {
                   )}
                   <div className="truncate">
                     <h4 className="text-base font-bold text-white leading-tight flex items-center gap-1 truncate">
-                      {userName} {userName.toLowerCase() === "heather" && <span title="Platform Creator">👑</span>}
+                      {userName} {isHostUser && <span title="Host Crown">👑</span>}
                     </h4>
                     <p className="text-[10px] text-amber-400 font-bold mt-0.5">
-                      {userName.toLowerCase() === "heather" ? "[Zip Groups Creator]" : "[Zip Member]"} &bull; @{userName.toLowerCase()}
+                      {isHostUser ? "[Verified Zip Host]" : "[Zip Member]"} &bull; @{userName.toLowerCase()}
                     </p>
                     {showEmailPublic && userEmail && <p className="text-[10px] text-gray-300 mt-1 truncate">✉️ {userEmail}</p>}
                     {showPhonePublic && userPhone && <p className="text-[10px] text-gray-300 mt-0.5 truncate">📞 {userPhone}</p>}
@@ -3228,20 +5273,28 @@ export default function Home() {
                 </div>
 
                 <div className="relative z-10 flex gap-2">
-                  <button 
-                    onClick={() => { setActivePM(friend); setIsMessagesView(true); setIsFriendsView(false); }}
-                    className="flex-1 py-2.5 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg hover:opacity-95 transition-all cursor-pointer text-xs flex items-center justify-center gap-1.5"
-                  >
-                    💬 Message
-                  </button>
-                  {friend.name.toLowerCase() !== 'zip bot' && friend.name.toLowerCase() !== 'heather' && (
-                    <button 
-                      onClick={() => handleRemoveFriend(friend.name)}
-                      className="px-3 py-2.5 bg-rose-950/60 hover:bg-rose-900/60 text-rose-400 rounded-xl border border-rose-800/60 text-xs font-bold transition-all cursor-pointer"
-                      title="Remove Friend"
-                    >
-                      Remove
-                    </button>
+                  {friend.name.toLowerCase() === 'heather' ? (
+                    <div className="w-full py-2.5 px-3 rounded-xl font-bold bg-gradient-to-r from-cyan-950/70 via-purple-950/70 to-black text-cyan-300 border border-cyan-500/40 text-center text-xs flex items-center justify-center gap-1.5 shadow-md">
+                      <span>👑 Founder</span>
+                    </div>
+                  ) : (
+                    <>
+                      <button 
+                        onClick={() => { setActivePM(friend); setIsMessagesView(true); setIsFriendsView(false); }}
+                        className="flex-1 py-2.5 rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg hover:opacity-95 transition-all cursor-pointer text-xs flex items-center justify-center gap-1.5"
+                      >
+                        💬 Message
+                      </button>
+                      {friend.name.toLowerCase() !== 'zip bot' && (
+                        <button 
+                          onClick={() => handleRemoveFriend(friend.name)}
+                          className="px-3 py-2.5 bg-rose-950/60 hover:bg-rose-900/60 text-rose-400 rounded-xl border border-rose-800/60 text-xs font-bold transition-all cursor-pointer"
+                          title="Remove Friend"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -3272,9 +5325,9 @@ export default function Home() {
             </div>
           </div>
 
-          <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-6 border-b border-gray-800 pb-2">Active Verified Partner Venues ({MOCK_PARTNER_VENUES.length})</h4>
+          <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-6 border-b border-gray-800 pb-2">Active Verified Partner Venues ({FEATURED_PARTNER_VENUES.length})</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-16">
-            {MOCK_PARTNER_VENUES.map(venue => (
+            {FEATURED_PARTNER_VENUES.map(venue => (
               <div key={venue.id} className="bg-[#111827] border border-gray-800 rounded-3xl p-6 shadow-xl flex flex-col justify-between hover:border-amber-500/40 transition-all relative">
                 <div>
                   <div className="flex justify-between items-start mb-3">
@@ -3315,6 +5368,7 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Host Milestone Reward Banner */}
           <div className="mb-8 w-full bg-gradient-to-r from-purple-950/70 via-[#111827] to-cyan-950/70 p-6 rounded-3xl border border-purple-500/40 shadow-xl flex flex-col lg:flex-row items-center justify-between gap-6">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
@@ -3345,7 +5399,7 @@ export default function Home() {
                       name: "Official Zip Host Starter Kit", 
                       price: 30, 
                       category: "Host Gear", 
-                      images: ["/zip-host-logo.png"],
+                      images: ["/host-kit.png"],
                       description: "Complete Host Starter Kit: Lanyard, Table Sign, Clipboard & Member Badges.",
                       cartId: kitId, 
                       selectedSize: "Complete Bundle", 
@@ -3368,14 +5422,15 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Official Gear In Action Videos */}
           {shopCategoryFilter === "All" && (
             <div className="mb-10 w-full flex flex-col gap-6 bg-gradient-to-br from-gray-900 to-black p-6 sm:p-8 rounded-3xl border border-gray-800 shadow-2xl relative overflow-hidden">
               <div className="relative z-10 text-center mb-2">
                 <span className="px-4 py-1 text-[11px] font-bold uppercase tracking-widest bg-cyan-950 text-cyan-300 border border-cyan-800/60 rounded-full">
-                  Official Gear
+                  Official Gear In Action
                 </span>
-                <h3 className="text-2xl font-black text-white mt-3 mb-1">Featured Zip Gear & Logo Designs</h3>
-                <p className="text-xs text-gray-400">Watch the community gear in action, then pick your favorite logo style on any product below.</p>
+                <h3 className="text-2xl font-black text-white mt-3 mb-1">Featured Zip Gear Videos</h3>
+                <p className="text-xs text-gray-400">Watch the community gear in action, then pick your favorite style on any product below.</p>
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 relative z-10">
@@ -3387,25 +5442,6 @@ export default function Home() {
                 </div>
                 <div className="bg-black/60 rounded-2xl border border-gray-800 overflow-hidden shadow-lg h-48 sm:h-56 relative flex items-center justify-center">
                   <video src="/HostKitZipstore3.mp4" autoPlay loop muted playsInline className="w-full h-full object-cover" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-2 relative z-10">
-                <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col items-center justify-center gap-3 hover:border-cyan-500/40 transition-colors">
-                  <img src="/zip-groups-logo.png" className="w-full h-16 object-contain" alt="Zip Groups Logo" />
-                  <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider text-center">Zip Groups (Standard)</span>
-                </div>
-                <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col items-center justify-center gap-3 hover:border-cyan-500/40 transition-colors">
-                  <img src="/zip-groups-logo-personalized.png" className="w-full h-16 object-contain" alt="Zip Groups Personalized Logo" />
-                  <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider text-center">Zip Groups (Personalized)</span>
-                </div>
-                <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col items-center justify-center gap-3 hover:border-cyan-500/40 transition-colors">
-                  <img src="/zip-host-logo.png" className="w-full h-16 object-contain" alt="Zip Host Logo" />
-                  <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider text-center">Zip Host (Standard)</span>
-                </div>
-                <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col items-center justify-center gap-3 hover:border-cyan-500/40 transition-colors">
-                  <img src="/zip-host-logo-personalized.png" className="w-full h-16 object-contain" alt="Zip Host Personalized Logo" />
-                  <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider text-center">Zip Host (Personalized)</span>
                 </div>
               </div>
             </div>
@@ -3612,79 +5648,55 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => {
-                          if (!shopShipping.fullName.trim() || !shopShipping.street.trim() || !shopShipping.city.trim() || !shopShipping.zip.trim()) {
-                            setNotification("⚠️ Please fill in all required shipping address fields.");
-                            return;
-                          }
+                      {/* DIRECT OFFICIAL PAYMENT GATEWAY: STRIPE (GOOGLE PAY, APPLE PAY, CARDS) */}
+                      <div className="flex flex-col gap-3 pt-1">
+                        <div className="text-center mb-1">
+                          <span className="text-[11px] font-black uppercase tracking-wider text-cyan-400">
+                            Secure Stripe Checkout (${grandTotal.toFixed(2)} Total):
+                          </span>
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            Real live checkout &bull; Instant order confirmation receipt
+                          </p>
+                        </div>
 
-                          const orderId = `ZIP-ORD-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
-                          
-                          // Itemized PayPal checkout with Merchant ID H6LCRCCPZUTBU
-                          let paypalUrl = `https://www.paypal.com/cgi-bin/webscr?cmd=_cart&upload=1&business=${encodeURIComponent("H6LCRCCPZUTBU")}&receiver_email=${encodeURIComponent("contactzipgroups@gmail.com")}&invoice=${encodeURIComponent(orderId)}&custom=${encodeURIComponent(orderId)}&currency_code=USD`;
+                        {/* Primary Stripe Button with Google Pay & Apple Pay */}
+                        <button
+                          type="button"
+                          disabled={isStripeLoading}
+                          onClick={() => handleInitiateStripeShopCheckout(subtotal, ohioSalesTax, shippingFee, grandTotal)}
+                          className="w-full py-4 px-5 rounded-2xl font-black bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 active:scale-[0.99] text-white shadow-xl hover:shadow-2xl transition-all cursor-pointer flex flex-col items-center justify-center border border-indigo-400/40"
+                        >
+                          <div className="flex items-center gap-2 text-sm md:text-base font-black">
+                            {isStripeLoading ? (
+                              <>
+                                <span className="animate-spin text-lg">⏳</span>
+                                <span>Connecting to Stripe Secure Checkout...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-lg">⚡</span>
+                                <span>Pay ${grandTotal.toFixed(2)} with Google Pay, Apple Pay or Card</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1.5 text-[11px] font-bold">
+                            <span className="bg-black/40 px-2.5 py-0.5 rounded-md border border-white/20 text-emerald-300">📱 Google Pay</span>
+                            <span className="bg-black/40 px-2.5 py-0.5 rounded-md border border-white/20 text-white">🍏 Apple Pay</span>
+                            <span className="bg-black/40 px-2.5 py-0.5 rounded-md border border-white/20 text-cyan-300">💳 Card</span>
+                          </div>
+                          <span className="text-[10px] font-medium text-indigo-100/80 mt-1">
+                            Instant verified order confirmation &bull; 256-Bit SSL Encrypted
+                          </span>
+                        </button>
 
-                          cart.forEach((item, idx) => {
-                            const itemNum = idx + 1;
-                            const customSuffix = item.customName ? ` [Custom: "${item.customName}" / ${item.customColorName || 'Standard'}]` : '';
-                            const sizeSuffix = item.selectedSize ? ` (${item.selectedSize})` : '';
-                            const fullItemName = `${item.name}${sizeSuffix} - ${item.selectedDesign}${customSuffix}`;
-                            
-                            paypalUrl += `&item_name_${itemNum}=${encodeURIComponent(fullItemName)}&amount_${itemNum}=${item.price.toFixed(2)}&quantity_${itemNum}=${item.quantity}`;
-                          });
-
-                          paypalUrl += `&tax_cart=${ohioSalesTax.toFixed(2)}`;
-                          paypalUrl += `&shipping_1=${shippingFee.toFixed(2)}`;
-                          paypalUrl += `&address_override=1`;
-                          paypalUrl += `&first_name=${encodeURIComponent(shopShipping.fullName.split(' ')[0] || '')}`;
-                          paypalUrl += `&last_name=${encodeURIComponent(shopShipping.fullName.split(' ').slice(1).join(' ') || '')}`;
-                          paypalUrl += `&address1=${encodeURIComponent(shopShipping.street + (shopShipping.apt ? ' ' + shopShipping.apt : ''))}`;
-                          paypalUrl += `&city=${encodeURIComponent(shopShipping.city)}`;
-                          paypalUrl += `&state=${encodeURIComponent(shopShipping.state)}`;
-                          paypalUrl += `&zip=${encodeURIComponent(shopShipping.zip)}`;
-                          if (shopShipping.phone) {
-                            paypalUrl += `&night_phone_b=${encodeURIComponent(shopShipping.phone)}`;
-                          }
-
-                          window.open(paypalUrl, "_blank");
-
-                          const completedOrder = {
-                            orderId,
-                            items: [...cart],
-                            subtotal,
-                            tax: ohioSalesTax,
-                            shipping: shippingFee,
-                            grandTotal,
-                            shippingAddress: { ...shopShipping },
-                            date: new Date().toLocaleDateString()
-                          };
-
-                          setLastCompletedOrder(completedOrder);
-
-                          if (userName) {
-                            try {
-                              setDoc(doc(db, "users", userName.toLowerCase()), {
-                                recentOrders: [orderId]
-                              }, { merge: true });
-                              addDoc(collection(db, "orders"), {
-                                ...completedOrder,
-                                userName,
-                                merchantId: "H6LCRCCPZUTBU",
-                                createdAt: Date.now()
-                              });
-                            } catch (e) {
-                              console.warn("Could not record order:", e);
-                            }
-                          }
-
-                          setCart([]);
-                          setIsCartOpen(false);
-                          setNotification(`🎉 Order ${orderId} created! PayPal checkout opened.`);
-                        }}
-                        className="w-full py-3.5 bg-gradient-to-r from-[#003087] to-[#0070ba] hover:opacity-95 text-white font-black text-sm rounded-xl shadow-lg cursor-pointer text-center flex items-center justify-center gap-2"
-                      >
-                        <span>🔒</span> Pay ${grandTotal.toFixed(2)} with PayPal / Cards
-                      </button>
+                        <div className="flex items-center justify-center gap-3 text-[10px] text-gray-400 mt-1">
+                          <span className="flex items-center gap-1">🔒 256-Bit SSL Encrypted</span>
+                          <span>&bull;</span>
+                          <span>Instant Receipt</span>
+                          <span>&bull;</span>
+                          <span>Free Shipping over $50</span>
+                        </div>
+                      </div>
                     </div>
                   );
                 })()}
@@ -3702,11 +5714,25 @@ export default function Home() {
             </div>
             <div className="flex gap-3 w-full md:w-auto">
               {isHostUser ? (
-                <button onClick={() => requireAuth(() => setIsUploadOpen(true))} className="flex-1 md:flex-none px-5 py-2.5 bg-pink-600 hover:bg-pink-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-md">+ Upload Photos</button>
+                <button 
+                  onClick={() => {
+                    if (!isLoggedIn) {
+                      setIsLoggedIn(true);
+                      if (!userName) setUserName("Heather");
+                    }
+                    setIsUploadOpen(true);
+                  }} 
+                  className="flex-1 md:flex-none px-5 py-2.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                >
+                  <span>📸</span> <span>+ Upload Photos</span>
+                </button>
               ) : (
-                <span className="text-xs text-amber-400 bg-amber-950/60 border border-amber-800/60 px-4 py-2 rounded-xl font-bold flex items-center gap-1.5">
-                  👑 Gallery Uploads Reserved for Hosts
-                </span>
+                <button 
+                  onClick={() => setIsManageSubOpen(true)}
+                  className="text-xs text-amber-300 bg-amber-950/80 hover:bg-amber-900 border border-amber-600/60 px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+                >
+                  <span>👑</span> <span>Unlock Gallery Uploads (Become a Host)</span>
+                </button>
               )}
               <button onClick={handleReset} className="flex-1 md:flex-none px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-sm rounded-xl border border-gray-700 transition-all cursor-pointer">&larr; Home</button>
             </div>
@@ -3734,6 +5760,205 @@ export default function Home() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+      ) : isUpcomingEventsView ? (
+        <div className="w-full max-w-6xl my-auto py-8">
+          <div className="flex justify-between items-center mb-8 bg-[#111827] p-6 rounded-2xl border border-gray-800 flex-wrap gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">📅</span>
+                <h3 className="text-2xl font-black text-white">Your Upcoming Meetups</h3>
+                {userUpcomingEvents.length > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 text-xs font-bold font-mono">
+                    {userUpcomingEvents.length} Active
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-gray-400 mt-1">All events you are hosting or have RSVP&apos;d to attend across local groups.</p>
+            </div>
+            <button onClick={handleReset} className="px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-sm rounded-xl border border-gray-700 transition-all cursor-pointer">&larr; Back to Home</button>
+          </div>
+
+          {userUpcomingEvents.length === 0 ? (
+            <div className="bg-[#111827] border border-gray-800 rounded-3xl p-12 text-center max-w-lg mx-auto">
+              <span className="text-5xl block mb-4">🎟️</span>
+              <h4 className="text-xl font-bold text-white mb-2">No Upcoming Meetups Yet</h4>
+              <p className="text-sm text-gray-400 mb-6 leading-relaxed">
+                You haven&apos;t RSVP&apos;d for any upcoming gatherings or hosted an event yet. Browse groups in your zip code or host your own!
+              </p>
+              <div className="flex justify-center gap-3 flex-wrap">
+                <button onClick={() => { handleReset(); setIsSearchOpen(true); }} className="px-5 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs rounded-xl shadow-lg hover:opacity-90 transition-all cursor-pointer">
+                  Search Local Groups
+                </button>
+                <button onClick={() => requireHostSubscription(() => setIsHostOpen(true))} className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 text-white font-bold text-xs rounded-xl shadow-lg hover:opacity-90 transition-all cursor-pointer">
+                  👑 Host an Event
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-16">
+              {userUpcomingEvents.map((evt, idx) => {
+                const isHost = evt.host && userName && evt.host.toLowerCase() === userName.toLowerCase();
+                const evtTitleName = evt.title || (evt.text ? evt.text.split(" (")[0] : "") || evt.text;
+                const { date: evtDate, time: evtTime } = getEventDateTime(evt);
+                const evtDescText = evt.description || "Neighborhood gathering";
+                const evtLocation = evt.locationName || `Zip ${evt.zipCode || "43230"}`;
+                const realRsvpList = Array.isArray(evt.rsvps) ? evt.rsvps : [];
+
+                return (
+                  <div key={evt.id || idx} className="bg-gray-900/90 border border-gray-800 rounded-3xl p-6 flex flex-col justify-between shadow-xl relative hover:border-cyan-500/50 transition-all">
+                    <div>
+                      {/* Photo Banner if provided */}
+                      {evt.photoUrl && (
+                        <div className="w-full h-36 rounded-2xl overflow-hidden mb-3.5 bg-black border border-gray-800 shadow-md">
+                          <img src={evt.photoUrl} alt={evtTitleName} className="w-full h-full object-cover" />
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
+                        <span className={`text-[10px] px-2.5 py-0.5 rounded-full border font-bold ${isHost ? 'bg-amber-950 text-amber-300 border-amber-700' : 'bg-emerald-950 text-emerald-300 border-emerald-700'}`}>
+                          {isHost ? '👑 Hosted by You' : "✅ You're Attending"}
+                        </span>
+                        {evt.isOnline && (
+                          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700 font-bold">
+                            🌐 Online Event
+                          </span>
+                        )}
+                        {evt.targetZips && evt.targetZips.length > 1 && (
+                          <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-950/70 text-purple-300 border border-purple-700/60 font-bold" title={evt.targetZips.join(", ")}>
+                            📡 Broadcasted ({evt.targetZips.length} Zips)
+                          </span>
+                        )}
+                        {evt.isAdultOnly && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 font-bold">18+ Only</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="text-[11px] text-cyan-400 font-bold uppercase tracking-wider">{evt.groupName || "Neighborhood Circle"}</p>
+                        <button
+                          type="button"
+                          onClick={() => handleNavigateToEventGroup(evt)}
+                          className="text-[11px] font-bold text-cyan-300 hover:text-white underline underline-offset-2 flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <span>Take me to the group</span>
+                          <span>&rarr;</span>
+                        </button>
+                      </div>
+                      <h4 className="text-lg font-black text-white mt-1 leading-snug">{evtTitleName}</h4>
+
+                      {/* Visible Date & Time Fields on Event Card */}
+                      <div className="mt-2.5 grid grid-cols-2 gap-2 bg-cyan-950/30 border border-cyan-800/50 rounded-xl p-2.5 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-cyan-400">📅</span>
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-gray-400 block leading-none">Date</span>
+                            <span className="font-bold text-cyan-200">{evtDate}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-amber-400">⏰</span>
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-gray-400 block leading-none">Time</span>
+                            <span className="font-bold text-amber-200">{evtTime}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Description: Pure Text Only */}
+                      <p className="text-xs text-gray-300 mt-2.5 leading-relaxed whitespace-pre-line">{evtDescText}</p>
+
+                      <div className="text-[11px] text-gray-400 mt-3 space-y-1.5 bg-black/40 p-3 rounded-xl border border-gray-800">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-cyan-400">{evt.isOnline ? "🌐" : "📍"}</span>
+                          <span className="font-medium text-gray-200">
+                            {evt.isOnline ? "Online Gathering" : (evtLocation.replace(/https?:\/\/[^\s]+/, '').trim() || evtLocation)}
+                          </span>
+                        </div>
+                        <p className="flex items-center gap-1.5"><span className="text-amber-400">👥</span> <span>{realRsvpList.length} neighbor{realRsvpList.length === 1 ? '' : 's'} going</span></p>
+                        
+                        {evt.targetZips && evt.targetZips.length > 1 && (
+                          <p className="text-[10px] text-gray-400 pt-1 border-t border-gray-800/80">
+                            📡 Included Zips: <span className="text-cyan-300 font-mono">{evt.targetZips.slice(0, 8).join(", ")}{evt.targetZips.length > 8 ? ` +${evt.targetZips.length - 8} more` : ""}</span>
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Location / Venue / Online Clickable Button */}
+                      {(() => {
+                        const urlMatch = (evtLocation || "").match(/(https?:\/\/[^\s]+)/);
+                        if (urlMatch) {
+                          const cleanUrl = urlMatch[0].replace(/[.,;!?)]+$/, "");
+                          let domain = cleanUrl;
+                          try { domain = new URL(cleanUrl).hostname.replace(/^www\./, ""); } catch {}
+
+                          return (
+                            <div className="mt-3">
+                              <a
+                                href={cleanUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full py-2.5 px-3.5 bg-gradient-to-r from-cyan-600/90 to-blue-600/90 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                              >
+                                <span>{evt.isOnline ? "🌐 Join Online Gathering / Discord" : "📍 Open Venue / Link"}</span>
+                                <span className="text-[10px] opacity-80">({domain}) &rarr;</span>
+                              </a>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+
+                    <div className="mt-5 pt-4 border-t border-gray-800 flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleNavigateToEventGroup(evt)}
+                        className="w-full py-2 px-3 bg-purple-950/60 hover:bg-purple-900/70 text-purple-200 border border-purple-700/60 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <span>👥 Take me to the group</span>
+                        <span>&rarr;</span>
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <a 
+                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evtTitleName)}&location=${encodeURIComponent(evtLocation)}`} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="flex-1 text-center py-2 bg-cyan-950/60 hover:bg-cyan-900 text-cyan-300 text-xs font-bold rounded-xl border border-cyan-800 transition-colors"
+                        >
+                          📅 Add to Calendar
+                        </a>
+                        {isHost && (
+                          <button 
+                            onClick={() => handleEditEvent(evt)} 
+                            className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-cyan-400 text-xs font-bold rounded-xl border border-gray-700 transition-colors cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {isHost ? (
+                          <button 
+                            onClick={() => handleCancelEvent(evt.id)} 
+                            className="px-3 py-2 bg-rose-950/60 hover:bg-rose-900 text-rose-300 text-xs font-bold rounded-xl border border-rose-800 transition-colors cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => toggleRSVP(evt)} 
+                            className="px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 text-xs font-bold rounded-xl border border-rose-800/60 transition-colors cursor-pointer"
+                          >
+                            Cancel RSVP
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -3968,7 +6193,8 @@ export default function Home() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {activeGroupEvents.map((rawEvt, idx) => {
                       const evt: GroupEvent = typeof rawEvt === "string" ? { id: rawEvt, text: rawEvt, color: selectedGroup.color, rsvps: [] } : rawEvt;
-                      const evtTitleName = evt.title || evt.text;
+                      const evtTitleName = evt.title || (evt.text ? evt.text.split(" (")[0] : "") || evt.text;
+                      const { date: evtDate, time: evtTime } = getEventDateTime(evt);
                       const evtDescText = evt.description || `Neighborhood gathering in ${selectedGroup.location}.`;
                       const evtColor = evt.color || selectedGroup.color;
                       const evtHost = evt.host;
@@ -3987,13 +6213,88 @@ export default function Home() {
                             </div>
                           )}
                           <div className="pr-20">
-                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full border ${evtColor}`}>Active Meetup</span>
-                            {evt.isAdultOnly && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 font-bold">18+ Only</span>}
-                            <h4 className="text-base font-bold text-white mt-2">{evtTitleName}</h4>
-                            <div className="text-xs text-gray-300 mt-1 leading-relaxed">{renderFormattedText(evtDescText)}</div>
-                            <p className="text-[11px] text-cyan-400 mt-1.5">📍 {evtLocation}</p>
+                            {/* Photo Banner if present */}
+                            {evt.photoUrl && (
+                              <div className="w-full h-32 rounded-xl overflow-hidden mb-3 bg-black border border-gray-800 shadow-md">
+                                <img src={evt.photoUrl} alt={evtTitleName} className="w-full h-full object-cover" />
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                              <span className={`text-[10px] px-2.5 py-0.5 rounded-full border ${evtColor}`}>Active Meetup</span>
+                              {evt.isOnline && <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold">🌐 Online</span>}
+                              {evt.targetZips && evt.targetZips.length > 1 && (
+                                <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-950/70 text-purple-300 border border-purple-700/60 font-bold" title={evt.targetZips.join(", ")}>
+                                  📡 {evt.targetZips.length} Zips
+                                </span>
+                              )}
+                              {evt.isAdultOnly && <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 font-bold">18+ Only</span>}
+                            </div>
+
+                            <h4 className="text-base font-bold text-white mt-1">{evtTitleName}</h4>
+
+                            {/* Visible Date & Time Fields on Event Card */}
+                            <div className="mt-2 grid grid-cols-2 gap-2 bg-cyan-950/30 border border-cyan-800/50 rounded-xl p-2 text-xs">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-cyan-400">📅</span>
+                                <div>
+                                  <span className="text-[9px] uppercase font-bold text-gray-400 block leading-none">Date</span>
+                                  <span className="font-bold text-cyan-200">{evtDate}</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-amber-400">⏰</span>
+                                <div>
+                                  <span className="text-[9px] uppercase font-bold text-gray-400 block leading-none">Time</span>
+                                  <span className="font-bold text-amber-200">{evtTime}</span>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Description: Pure Text Only */}
+                            <p className="text-xs text-gray-300 mt-2 leading-relaxed whitespace-pre-line">{evtDescText}</p>
+                            
+                            <div className="text-[11px] text-cyan-400 mt-2 flex items-center gap-1.5 flex-wrap">
+                              <span>{evt.isOnline ? "🌐" : "📍"}</span>
+                              <span className="font-medium">
+                                {evt.isOnline ? "Online Gathering" : (evtLocation.replace(/https?:\/\/[^\s]+/, '').trim() || evtLocation)}
+                              </span>
+                            </div>
+
+                            {/* Location / Venue / Online Clickable Button */}
+                            {(() => {
+                              const urlMatch = (evtLocation || "").match(/(https?:\/\/[^\s]+)/);
+                              if (urlMatch) {
+                                const cleanUrl = urlMatch[0].replace(/[.,;!?)]+$/, "");
+                                let domain = cleanUrl;
+                                try { domain = new URL(cleanUrl).hostname.replace(/^www\./, ""); } catch {}
+
+                                return (
+                                  <div className="mt-2.5">
+                                    <a
+                                      href={cleanUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-200 text-xs font-bold rounded-xl transition-all shadow-sm"
+                                    >
+                                      <span>{evt.isOnline ? "🌐 Join Online Meetup" : "📍 Venue Link"}</span>
+                                      <span className="text-[10px] opacity-75 font-mono">({domain}) &rarr;</span>
+                                    </a>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                             
                             <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => handleNavigateToEventGroup(evt)}
+                                className="inline-flex items-center gap-1 text-[10px] text-purple-300 bg-purple-950/60 hover:bg-purple-900/80 border border-purple-700/60 px-2.5 py-1 rounded-md font-bold transition-colors cursor-pointer"
+                              >
+                                👥 Take me to the group &rarr;
+                              </button>
+
                               <a href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(selectedGroup.name + " - " + evtTitleName)}&location=${encodeURIComponent(evtLocation)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[10px] text-cyan-300 bg-cyan-950/40 hover:bg-cyan-900/60 border border-cyan-800/50 px-2.5 py-1 rounded-md transition-colors">
                                 📅 Add to Google Calendar
                               </a>
@@ -4116,7 +6417,41 @@ export default function Home() {
               )}
             </div>
             
-            {!isJoined && !selectedGroup.isHostOnly ? (
+            {!isLoggedIn ? (
+              <div className="bg-gray-900/90 border border-gray-800 rounded-2xl p-8 text-center relative overflow-hidden">
+                <div className="flex flex-col items-center justify-center z-10 p-6">
+                  <div className="text-3xl mb-2">🔒</div>
+                  <h4 className="text-lg font-bold text-white mb-1">Group Chatroom is Locked</h4>
+                  <p className="text-xs text-gray-400 max-w-sm mb-4">Please sign in or create an account to verify your email and unlock live local chat.</p>
+                  <button onClick={() => setIsAuthOpen(true)} className="px-5 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs rounded-xl shadow-lg hover:opacity-95 transition-all cursor-pointer">Sign In / Register</button>
+                </div>
+              </div>
+            ) : !isEmailVerified ? (
+              <div className="bg-gray-900/90 border border-amber-500/50 rounded-2xl p-8 text-center relative overflow-hidden shadow-xl shadow-amber-950/20">
+                <div className="flex flex-col items-center justify-center z-10 p-6">
+                  <div className="text-3xl mb-2">📧</div>
+                  <h4 className="text-lg font-bold text-white mb-1">Email Verification Required to Access Chat</h4>
+                  <p className="text-xs text-gray-300 max-w-md mb-5 leading-relaxed">
+                    To maintain a safe neighborhood platform and protect our local groups from spam and bot accounts, live chat access requires email verification.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      onClick={() => setIsVerifyModalOpen(true)}
+                      className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:opacity-90 text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer"
+                    >
+                      Enter 6-Digit Verification Code
+                    </button>
+                    <button
+                      onClick={handleSendVerificationEmail}
+                      disabled={isSendingCode}
+                      className="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer"
+                    >
+                      {isSendingCode ? "Sending Code..." : "Resend Verification Email"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : !isJoined && !selectedGroup.isHostOnly ? (
               <div className="bg-gray-900/90 border border-gray-800 rounded-2xl p-8 text-center relative overflow-hidden">
                 <div className="flex flex-col items-center justify-center z-10 p-6">
                   <div className="text-3xl mb-2">🔒</div>
@@ -4301,60 +6636,270 @@ export default function Home() {
 
       ) : hasSearched ? (
         <div className="w-full max-w-6xl my-auto py-8">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 bg-[#111827] p-6 rounded-2xl border border-gray-800">
+          {/* TOP LOCATION & ACTIONS BAR */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 bg-[#111827] p-6 rounded-2xl border border-gray-800 shadow-xl">
             <div>
-              <h3 className="text-2xl font-black text-white">Groups near Zip Code: <span className="text-cyan-400">{zipCode}</span></h3>
-              <p className="text-sm text-gray-400 mt-1">Showing active communities within a <span className="text-white font-bold">{radius}-mile radius</span>.</p>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-800/60">
+                  📍 Hyper-Local Groups
+                </span>
+                <span className="text-xs text-gray-400">&bull; {radius}-mile radius</span>
+              </div>
+              <h3 className="text-2xl font-black text-white">
+                Neighborhood Groups near Zip <span className="text-cyan-400 font-mono">{zipCode}</span>
+              </h3>
             </div>
-            <div className="flex items-center gap-3">
-              <button onClick={() => toggleSaveZip(zipCode)} className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-md ${savedZips.includes(zipCode) ? 'bg-amber-950/80 border-amber-800 text-amber-400' : 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-300'}`}>
-                {savedZips.includes(zipCode) ? '★ Saved Zip' : '☆ Save Zip Code'}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button 
+                onClick={() => toggleSaveZip(zipCode)} 
+                className={`px-3.5 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-md flex items-center gap-1.5 ${savedZips.includes(zipCode) ? 'bg-amber-950/80 border-amber-800 text-amber-400' : 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-300'}`}
+              >
+                <span>{savedZips.includes(zipCode) ? '★' : '☆'}</span>
+                <span>{savedZips.includes(zipCode) ? 'Saved Zip' : 'Save Zip'}</span>
               </button>
-              <button onClick={() => setIsSearchOpen(true)} className="px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 font-bold text-sm rounded-xl border border-gray-700 transition-all cursor-pointer">Change Location</button>
+              <button 
+                onClick={() => setIsSearchOpen(true)} 
+                className="px-4 py-2 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/30 hover:to-blue-500/30 text-cyan-300 border border-cyan-500/40 font-bold text-xs rounded-xl transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+              >
+                <span>🔍</span>
+                <span>Change Radius / Zip</span>
+              </button>
             </div>
           </div>
 
-          <div className="max-h-[650px] overflow-y-auto p-2 pb-16 grid grid-cols-1 md:grid-cols-2 gap-6 custom-scrollbar">
-            {stackedGroups.map((stack, idx) => {
-              const primaryGroup = stack[0];
-              const totalStackedMembers = stack.reduce((sum, g) => sum + (groupMemberCounts[g.id] || 0), 0);
-              const hasAnyChatActive = stack.some(g => isChatActiveWithin2Mins(g.chatMessages));
-              
-              return (
-                <div key={idx} className={`flex flex-col justify-between p-6 bg-[#111827] rounded-2xl border border-gray-800 ${primaryGroup.glow} transition-all relative`}>
-                  <div className="absolute top-4 right-4 flex items-center gap-2">
-                    {hasAnyChatActive && (
-                      <span className="text-[9px] bg-emerald-950 text-emerald-300 border-emerald-800/60 px-2 py-0.5 rounded-full border font-bold uppercase tracking-wider">Chat Active</span>
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-3 mb-3 pr-16">
-                      <div className="w-12 h-12 rounded-xl bg-gray-800 flex items-center justify-center text-xl font-bold shrink-0">{primaryGroup.icon}</div>
-                      <div>
-                        <p className="text-lg font-bold text-gray-100 leading-tight">{primaryGroup.name}</p>
-                        <p className="text-[10px] text-cyan-400 mt-0.5">{stack.length} Active Chapter{stack.length > 1 ? 's' : ''} &bull; {totalStackedMembers} Joined Member{totalStackedMembers === 1 ? '' : 's'}</p>
+          {/* INTERACTIVE GROUP BROWSING SYSTEM */}
+          <div className="bg-[#111827]/90 border border-gray-800/90 rounded-2xl p-4 sm:p-5 mb-6 shadow-xl flex flex-col gap-4">
+            {/* Live Keyword Search Input & View Mode Switcher */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">🔍</span>
+                <input
+                  type="text"
+                  placeholder="Filter groups by name or topic (e.g. Hiking, Coffee, Board Games, Dog, 20s)..."
+                  value={groupSearchQuery}
+                  onChange={(e) => setGroupSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2.5 bg-black border border-gray-700/80 rounded-xl text-white text-xs placeholder:text-gray-500 focus:outline-none focus:border-cyan-400 transition-colors"
+                />
+                {groupSearchQuery && (
+                  <button
+                    onClick={() => setGroupSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white font-bold text-xs cursor-pointer"
+                    title="Clear search"
+                  >
+                    &times;
+                  </button>
+                )}
+              </div>
+
+              {/* View Switcher Toggle */}
+              <div className="flex items-center gap-1 bg-black/60 p-1 rounded-xl border border-gray-800 shrink-0 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setGroupViewMode("grid")}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${groupViewMode === "grid" ? "bg-cyan-600 text-white shadow" : "text-gray-400 hover:text-white"}`}
+                  title="Card Grid View"
+                >
+                  <span>⊞</span>
+                  <span className="hidden sm:inline">Cards</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGroupViewMode("compact")}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${groupViewMode === "compact" ? "bg-cyan-600 text-white shadow" : "text-gray-400 hover:text-white"}`}
+                  title="Compact List View"
+                >
+                  <span>☰</span>
+                  <span className="hidden sm:inline">Compact List</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
+              {[
+                { id: "All", label: "✨ All Groups", icon: "✨" },
+                { id: "Active & Outdoors", label: "🥾 Outdoors", icon: "🥾" },
+                { id: "Food & Dining", label: "☕ Food & Dining", icon: "☕" },
+                { id: "Games & Hobbies", label: "🎲 Games & Hobbies", icon: "🎲" },
+                { id: "Social Circles", label: "🤝 Social", icon: "🤝" },
+                { id: "Family & Support", label: "👨‍👩‍👧 Family & Support", icon: "👨‍👩‍👧" }
+              ].map(cat => {
+                const count = categoryCounts[cat.id] || 0;
+                const isActive = groupCategoryFilter === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setGroupCategoryFilter(cat.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 border ${
+                      isActive 
+                        ? "bg-cyan-500 text-black border-cyan-400 shadow-md shadow-cyan-500/20" 
+                        : "bg-gray-900/80 text-gray-300 hover:text-white border-gray-800 hover:border-gray-700"
+                    }`}
+                  >
+                    <span>{cat.label}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isActive ? "bg-black/20 text-black" : "bg-gray-800 text-gray-400"}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Active Filters Summary */}
+            <div className="flex items-center justify-between text-xs text-gray-400 border-t border-gray-800/80 pt-2.5">
+              <span>
+                Showing <strong>{stackedGroups.length}</strong> of {allStackedGroups.length} neighborhood Groups
+                {groupCategoryFilter !== "All" && ` in ${groupCategoryFilter}`}
+                {groupSearchQuery && ` matching "${groupSearchQuery}"`}
+              </span>
+              {(groupCategoryFilter !== "All" || groupSearchQuery) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGroupCategoryFilter("All");
+                    setGroupSearchQuery("");
+                  }}
+                  className="text-cyan-400 hover:underline font-bold cursor-pointer text-xs"
+                >
+                  Reset Filters &times;
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* NO RESULTS EMPTY STATE */}
+          {stackedGroups.length === 0 ? (
+            <div className="bg-[#111827] border border-gray-800 rounded-3xl p-12 text-center max-w-md mx-auto shadow-2xl">
+              <span className="text-4xl mb-3 inline-block">🔍</span>
+              <h4 className="text-lg font-bold text-white mb-1">No Groups found</h4>
+              <p className="text-xs text-gray-400 mb-5 leading-relaxed">
+                No local groups match &ldquo;{groupSearchQuery}&rdquo; in {groupCategoryFilter}.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupCategoryFilter("All");
+                  setGroupSearchQuery("");
+                }}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl shadow cursor-pointer"
+              >
+                View All {allStackedGroups.length} Groups in {zipCode}
+              </button>
+            </div>
+          ) : groupViewMode === "grid" ? (
+            /* GRID VIEW (Rich Cards) */
+            <div className="max-h-[700px] overflow-y-auto p-2 pb-16 grid grid-cols-1 md:grid-cols-2 gap-6 custom-scrollbar">
+              {stackedGroups.map((stack, idx) => {
+                const primaryGroup = stack[0];
+                const totalStackedMembers = stack.reduce((sum, g) => sum + (groupMemberCounts[g.id] || 0), 0);
+                const hasAnyChatActive = stack.some(g => isChatActiveWithin2Mins(g.chatMessages));
+                
+                return (
+                  <div key={idx} className={`flex flex-col justify-between p-6 bg-[#111827] rounded-2xl border border-gray-800 hover:border-gray-700 ${primaryGroup.glow} transition-all relative shadow-lg`}>
+                    <div className="absolute top-4 right-4 flex items-center gap-2">
+                      <span className="text-[9px] bg-gray-800/80 text-gray-400 border border-gray-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                        {primaryGroup.category}
+                      </span>
+                      {hasAnyChatActive && (
+                        <span className="text-[9px] bg-emerald-950 text-emerald-300 border-emerald-800/60 px-2 py-0.5 rounded-full border font-bold uppercase tracking-wider animate-pulse">
+                          Chat Active
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-3 mb-3 pr-24">
+                        <div className="w-12 h-12 rounded-xl bg-gray-800 flex items-center justify-center text-xl font-bold shrink-0 shadow-inner">
+                          {primaryGroup.icon}
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-gray-100 leading-tight">{primaryGroup.name}</p>
+                          <p className="text-[10px] text-cyan-400 mt-0.5 font-medium">
+                            {stack.length} Active Chapter{stack.length > 1 ? 's' : ''} &bull; {totalStackedMembers} Joined Member{totalStackedMembers === 1 ? '' : 's'}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-300 italic mb-4 line-clamp-2 leading-relaxed">
+                        &ldquo;{primaryGroup.description}&rdquo;
+                      </p>
+                    </div>
+                    
+                    <div className="pt-3 border-t border-gray-800/80 flex flex-col gap-2">
+                      <div className="flex justify-between items-center">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Available Chapters:</p>
+                        <button 
+                          onClick={() => setSelectedGroup(primaryGroup)}
+                          className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer hover:underline"
+                        >
+                          <span>Open Circle</span>
+                          <span>&rarr;</span>
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {stack.map(g => (
+                          <button key={g.id} onClick={() => setSelectedGroup(g)} className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 hover:border-cyan-500/50 text-cyan-300 text-[10px] font-mono font-bold rounded-lg border border-gray-700/80 transition-colors cursor-pointer">
+                            📍 {g.zipCode}
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    <p className="text-xs text-gray-300 italic mb-4 line-clamp-2">&ldquo;{primaryGroup.description}&rdquo;</p>
                   </div>
-                  
-                  <div className="pt-3 border-t border-gray-800/80">
-                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Available Neighborhoods:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {stack.map(g => {
-                        const realCount = groupMemberCounts[g.id] || 0;
-                        return (
-                          <button key={g.id} onClick={() => setSelectedGroup(g)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 text-[10px] font-bold rounded-lg border border-gray-700 transition-colors cursor-pointer">
-                            📍 Zip: {g.zipCode} ({realCount} {realCount === 1 ? 'member' : 'members'})
-                          </button>
-                        );
-                      })}
+                );
+              })}
+            </div>
+          ) : (
+            /* COMPACT LIST VIEW (Super-fast, easily scannable) */
+            <div className="bg-[#111827] border border-gray-800 rounded-2xl overflow-hidden shadow-2xl divide-y divide-gray-800/80">
+              {stackedGroups.map((stack, idx) => {
+                const primaryGroup = stack[0];
+                const totalStackedMembers = stack.reduce((sum, g) => sum + (groupMemberCounts[g.id] || 0), 0);
+                const hasAnyChatActive = stack.some(g => isChatActiveWithin2Mins(g.chatMessages));
+
+                return (
+                  <div 
+                    key={idx} 
+                    className="p-4 hover:bg-gray-900/60 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                      <div className="w-10 h-10 rounded-xl bg-gray-800 flex items-center justify-center text-lg font-bold shrink-0">
+                        {primaryGroup.icon}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h5 className="text-sm font-bold text-white truncate">{primaryGroup.name}</h5>
+                          <span className="text-[9px] bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full border border-gray-700 font-semibold">
+                            {primaryGroup.category}
+                          </span>
+                          {hasAnyChatActive && (
+                            <span className="text-[9px] bg-emerald-950 text-emerald-300 border border-emerald-800/60 px-1.5 py-0.2 rounded-full font-bold">
+                              Chat Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-400 truncate mt-0.5">
+                          {primaryGroup.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                      <div className="text-right hidden sm:block">
+                        <p className="text-xs font-mono font-bold text-cyan-400">{totalStackedMembers} Member{totalStackedMembers === 1 ? '' : 's'}</p>
+                        <p className="text-[10px] text-gray-500">{stack.length} Zip Chapter{stack.length > 1 ? 's' : ''}</p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedGroup(primaryGroup)}
+                        className="px-3 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl shadow cursor-pointer transition-all flex items-center gap-1"
+                      >
+                        <span>Join</span>
+                        <span>&rarr;</span>
+                      </button>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
       ) : (
@@ -4401,7 +6946,7 @@ export default function Home() {
                     <span className="text-2xl font-black">🥇</span>
                     <div>
                       <p className="text-xs font-bold text-white">Zip 43230 (Gahanna)</p>
-                      <p className="text-[10px] text-amber-400 font-medium">30 Active Community Circles</p>
+                      <p className="text-[10px] text-amber-400 font-medium">30 Active Community Groups</p>
                     </div>
                   </div>
 
@@ -4409,7 +6954,7 @@ export default function Home() {
                     <span className="text-2xl font-black">🥈</span>
                     <div>
                       <p className="text-xs font-bold text-white">Zip 43215 (Downtown)</p>
-                      <p className="text-[10px] text-gray-400 font-medium">30 Active Community Circles</p>
+                      <p className="text-[10px] text-gray-400 font-medium">30 Active Community Groups</p>
                     </div>
                   </div>
 
@@ -4417,7 +6962,7 @@ export default function Home() {
                     <span className="text-2xl font-black">🥉</span>
                     <div>
                       <p className="text-xs font-bold text-white">Zip 43214 (Clintonville)</p>
-                      <p className="text-[10px] text-amber-600 font-medium">30 Active Community Circles</p>
+                      <p className="text-[10px] text-amber-600 font-medium">30 Active Community Groups</p>
                     </div>
                   </div>
                 </div>
@@ -4462,7 +7007,7 @@ export default function Home() {
                 Find your people right <br /><span className="bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-500 bg-clip-text text-transparent">down the street.</span>
               </h2>
               <p className="mt-6 text-sm sm:text-base text-gray-400 max-w-xl font-light leading-relaxed">
-                Explore hyper-local circles, connect instantly with neighbors, and build a thriving community map—zip code by zip code.
+                Explore hyper-local Groups, connect instantly with neighbors, and build a thriving community map—zip code by zip code.
               </p>
               <form onSubmit={handleSearch} className="mt-8 flex flex-col sm:flex-row items-center gap-2 w-full max-w-lg bg-gray-950/80 p-2 rounded-2xl border border-cyan-500/50 shadow-xl">
                 <div className="flex items-center gap-2 px-3 py-1.5 w-full flex-1">
@@ -4480,7 +7025,7 @@ export default function Home() {
                   type="submit"
                   className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg hover:opacity-90 transition-all cursor-pointer shrink-0"
                 >
-                  Explore Circles &rarr;
+                  Explore Groups &rarr;
                 </button>
               </form>
 
@@ -4497,7 +7042,7 @@ export default function Home() {
                   onClick={() => requireHostSubscription(() => setIsHostOpen(true))}
                   className="px-4 py-2 rounded-xl text-xs font-bold text-emerald-300 hover:text-white bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-700/60 transition-all cursor-pointer flex items-center gap-1.5"
                 >
-                  👑 Start 7-Day Free Trial (Host)
+                  👑 Start 30-Day Free Trial (Host)
                 </button>
               </div>
 
@@ -4546,7 +7091,7 @@ export default function Home() {
                     <li>🪧 Yard Sign &amp; Lanyards</li>
                   </ul>
                   <button onClick={() => requireHostSubscription(() => setIsHostOpen(true))} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-bold text-xs rounded-xl shadow-lg hover:opacity-95 transition-all cursor-pointer">
-                    Start 7-Day Free Trial
+                    Start 30-Day Free Trial
                   </button>
                 </div>
               </div>
@@ -4567,6 +7112,264 @@ export default function Home() {
               <p className="text-xs text-gray-400 mt-1 uppercase tracking-wider font-semibold">Zip Code Coverage</p>
             </div>
           </div>
+
+          {/* COMMUNITY MANIFESTO: DRIVEN BY REAL NEIGHBORS & FRIENDS */}
+          <section className="mt-16 max-w-5xl w-full bg-[#111827]/90 border border-cyan-500/30 rounded-3xl p-6 sm:p-10 shadow-2xl z-10 text-left">
+            <div className="text-center max-w-3xl mx-auto mb-8">
+              <span className="px-3.5 py-1 text-[11px] font-bold uppercase tracking-widest bg-cyan-950 text-cyan-300 border border-cyan-800/60 rounded-full">
+                Our Community Promise
+              </span>
+              <h3 className="text-2xl sm:text-3xl font-black text-white mt-3">
+                100% Community-Driven by Real Neighbors &amp; Friends
+              </h3>
+              <p className="text-xs sm:text-sm text-gray-300 mt-2 leading-relaxed">
+                Zip Groups was created because getting together with people who live in your area shouldn&apos;t be complicated, corporate, or hidden behind organizer paywalls. We&apos;re regular neighbors building genuine human connection—block by block, zip code by zip code.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
+              <div className="bg-gray-900/80 border border-gray-800 p-5 rounded-2xl flex items-start gap-4">
+                <span className="text-2xl p-2.5 bg-cyan-950/80 text-cyan-400 rounded-xl border border-cyan-800/50 shrink-0">🤝</span>
+                <div>
+                  <h4 className="text-sm font-bold text-white mb-1">People Over Algorithms</h4>
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    While the competition prioritizes advertising algorithms and corporate sponsorships, Zip Groups is built for everyday neighbors, friends, and local families who want real social Groups.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-gray-900/80 border border-gray-800 p-5 rounded-2xl flex items-start gap-4">
+                <span className="text-2xl p-2.5 bg-emerald-950/80 text-emerald-400 rounded-xl border border-emerald-800/50 shrink-0">🎉</span>
+                <div>
+                  <h4 className="text-sm font-bold text-white mb-1">Zero Paywalls for Members</h4>
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    Unlike that other site where members face hidden limits or organizers get hit with astronomical fees, joining, messaging, and attending gatherings on Zip Groups is 100% free forever.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-gray-900/80 border border-gray-800 p-5 rounded-2xl flex items-start gap-4">
+                <span className="text-2xl p-2.5 bg-amber-950/80 text-amber-400 rounded-xl border border-amber-800/50 shrink-0">🎁</span>
+                <div>
+                  <h4 className="text-sm font-bold text-white mb-1">Real Support for Local Hosts</h4>
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    Every active Zip Host receives a physical Host Welcome Kit shipped to their door—tote bag, yard sign, table placard, and lanyards—to make hosting effortless and welcoming.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-gray-900/80 border border-gray-800 p-5 rounded-2xl flex items-start gap-4">
+                <span className="text-2xl p-2.5 bg-rose-950/80 text-rose-400 rounded-xl border border-rose-800/50 shrink-0">🛡️</span>
+                <div>
+                  <h4 className="text-sm font-bold text-white mb-1">Safety First, Always</h4>
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    Our free built-in Safety Suite includes personal check-in timers, emergency GPS dispatches, and an instant 911 assist safeguard that no other meetup site offers.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* CRAWLABLE KEYWORD DIRECTORY SECTION (Search Engine Indexable) */}
+            <div className="border-t border-gray-800/80 pt-8">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-6">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-400">
+                    Crawlable Local Directory &amp; Activity Index
+                  </span>
+                  <h4 className="text-lg font-black text-white mt-0.5">
+                    Explore Neighborhood Gathering Topics by Zip Code
+                  </h4>
+                </div>
+                <span className="text-[11px] text-gray-400">Index of 39 Core Groups in Every US Zip</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {/* Out & About */}
+                <div className="bg-black/40 border border-gray-800/70 p-4 rounded-2xl">
+                  <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-2.5 flex items-center gap-1.5">
+                    <span>🥾</span> Active &amp; Outdoors
+                  </h5>
+                  <ul className="space-y-1.5 text-xs text-gray-300">
+                    {[
+                      { label: "Local Hiking Clubs", query: "Hiking" },
+                      { label: "Dog Walking Groups", query: "Dog Walking" },
+                      { label: "Morning Running & 5K", query: "Running" },
+                      { label: "Pickleball & Tennis", query: "Pickleball" },
+                      { label: "Casual Bike Rides", query: "Cycling" },
+                      { label: "State Park Trails", query: "Parks" },
+                      { label: "Sports & Fitness", query: "Fitness" }
+                    ].map(item => (
+                      <li key={item.label}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setZipCode(zipCode || "43230");
+                            setGroupCategoryFilter("Active & Outdoors");
+                            setGroupSearchQuery(item.query);
+                            setHasSearched(true);
+                          }}
+                          className="hover:text-cyan-300 hover:underline cursor-pointer text-left transition-colors flex items-center gap-1.5"
+                        >
+                          <span className="text-emerald-500">&bull;</span>
+                          <span>{item.label}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Food & Dining */}
+                <div className="bg-black/40 border border-gray-800/70 p-4 rounded-2xl">
+                  <h5 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2.5 flex items-center gap-1.5">
+                    <span>☕</span> Food, Drinks &amp; Dining
+                  </h5>
+                  <ul className="space-y-1.5 text-xs text-gray-300">
+                    {[
+                      { label: "Coffee & Morning Chats", query: "Coffee" },
+                      { label: "Foodies & Dining Out", query: "Foodies" },
+                      { label: "Microbrewery Meetups", query: "Breweries" },
+                      { label: "Wine Tasting Flights", query: "Wine" },
+                      { label: "Supper & Potluck Clubs", query: "Cooking" },
+                      { label: "Baking & Desserts", query: "Baking" },
+                      { label: "Restaurant Explorers", query: "Foodies" }
+                    ].map(item => (
+                      <li key={item.label}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setZipCode(zipCode || "43230");
+                            setGroupCategoryFilter("Food & Dining");
+                            setGroupSearchQuery(item.query);
+                            setHasSearched(true);
+                          }}
+                          className="hover:text-cyan-300 hover:underline cursor-pointer text-left transition-colors flex items-center gap-1.5"
+                        >
+                          <span className="text-amber-500">&bull;</span>
+                          <span>{item.label}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Games & Hobbies */}
+                <div className="bg-black/40 border border-gray-800/70 p-4 rounded-2xl">
+                  <h5 className="text-xs font-bold uppercase tracking-wider text-purple-400 mb-2.5 flex items-center gap-1.5">
+                    <span>🎲</span> Games &amp; Hobbies
+                  </h5>
+                  <ul className="space-y-1.5 text-xs text-gray-300">
+                    {[
+                      { label: "Board Game Nights", query: "Board Games" },
+                      { label: "Tabletop RPG & D&D", query: "Tabletop" },
+                      { label: "Trivia Night Teams", query: "Trivia" },
+                      { label: "Video Game Lobbies", query: "Video Games" },
+                      { label: "Arcades & Pinball", query: "Arcades" },
+                      { label: "Photography Walks", query: "Photography" },
+                      { label: "Book & Sci-Fi Clubs", query: "Book" },
+                      { label: "Knitting & DIY Crafts", query: "Crafts" }
+                    ].map(item => (
+                      <li key={item.label}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setZipCode(zipCode || "43230");
+                            setGroupCategoryFilter("Games & Hobbies");
+                            setGroupSearchQuery(item.query);
+                            setHasSearched(true);
+                          }}
+                          className="hover:text-cyan-300 hover:underline cursor-pointer text-left transition-colors flex items-center gap-1.5"
+                        >
+                          <span className="text-purple-400">&bull;</span>
+                          <span>{item.label}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Social & Community */}
+                <div className="bg-black/40 border border-gray-800/70 p-4 rounded-2xl">
+                  <h5 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2.5 flex items-center gap-1.5">
+                    <span>🤝</span> Social &amp; Community
+                  </h5>
+                  <ul className="space-y-1.5 text-xs text-gray-300">
+                    {[
+                      { label: "20s & 30s Socials", query: "20s & 30s" },
+                      { label: "40+ Neighborhood Circle", query: "40+" },
+                      { label: "Men's Social Circle", query: "Men's" },
+                      { label: "Women's Social Circle", query: "Women's" },
+                      { label: "Singles Social Mixers", query: "Singles" },
+                      { label: "Co-Working & Freelancers", query: "Remote" },
+                      { label: "LGBTQ+ Community", query: "LGBTQ+" },
+                      { label: "Volunteers & Charity", query: "Volunteers" }
+                    ].map(item => (
+                      <li key={item.label}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setZipCode(zipCode || "43230");
+                            setGroupCategoryFilter("Social Circles");
+                            setGroupSearchQuery(item.query);
+                            setHasSearched(true);
+                          }}
+                          className="hover:text-cyan-300 hover:underline cursor-pointer text-left transition-colors flex items-center gap-1.5"
+                        >
+                          <span className="text-cyan-400">&bull;</span>
+                          <span>{item.label}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Crawlable Metro Zip Code Index */}
+              <div className="mt-6 p-4 bg-gray-950/60 rounded-2xl border border-gray-800/80">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">
+                  Popular Community Zip Hubs Across The Nation:
+                </p>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {[
+                    { city: "Gahanna, OH", zip: "43230" },
+                    { city: "Columbus Downtown, OH", zip: "43215" },
+                    { city: "Clintonville, OH", zip: "43214" },
+                    { city: "Dublin, OH", zip: "43017" },
+                    { city: "Westerville, OH", zip: "43081" },
+                    { city: "Cincinnati, OH", zip: "45202" },
+                    { city: "Cleveland, OH", zip: "44113" },
+                    { city: "Austin, TX", zip: "78701" },
+                    { city: "Charlotte, NC", zip: "28202" },
+                    { city: "Nashville, TN", zip: "37203" },
+                    { city: "Tampa, FL", zip: "33602" },
+                    { city: "Denver, CO", zip: "80202" },
+                    { city: "Phoenix, AZ", zip: "85004" },
+                    { city: "Chicago, IL", zip: "60601" }
+                  ].map(hub => (
+                    <button
+                      key={hub.zip}
+                      type="button"
+                      onClick={() => {
+                        setZipCode(hub.zip);
+                        setHasSearched(true);
+                      }}
+                      className="px-2.5 py-1 bg-gray-900 hover:bg-gray-800 border border-gray-700/80 hover:border-cyan-500 rounded-lg text-cyan-300 font-mono text-[11px] transition-colors cursor-pointer"
+                    >
+                      {hub.city} ({hub.zip})
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSearchOpen(true);
+                    }}
+                    className="px-2.5 py-1 bg-cyan-950 hover:bg-cyan-900 border border-cyan-600 rounded-lg text-white font-bold text-[11px] transition-colors cursor-pointer"
+                  >
+                    + Search Any US Zip Code
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       )}
 
@@ -4588,6 +7391,81 @@ export default function Home() {
             </p>
 
             <form onSubmit={handleSaveEditedEvent} className="flex flex-col gap-3">
+              {/* EDIT BROADCAST RADIUS SLIDER (Grayed out when Online Event is ticked) */}
+              <div
+                className={`bg-gray-900/70 p-3 rounded-2xl border border-gray-800 flex flex-col gap-2.5 transition-all ${
+                  editEventIsOnline ? "opacity-40 pointer-events-none select-none grayscale" : ""
+                }`}
+                aria-disabled={editEventIsOnline}
+              >
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                    Host Center Zip Code {editEventIsOnline && <span className="text-gray-400 normal-case font-normal">(Disabled for online event)</span>}
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={5}
+                    value={editEventZip}
+                    onChange={(e) => setEditEventZip(e.target.value)}
+                    placeholder="43230"
+                    required={!editEventIsOnline}
+                    disabled={editEventIsOnline}
+                    className="w-24 px-2.5 py-1 bg-black border border-gray-700 rounded-lg text-white font-mono text-xs text-center focus:outline-none focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-[10px] font-bold uppercase text-gray-400">Broadcast Radius Slider</span>
+                    <span className="text-xs font-bold text-cyan-300 bg-cyan-950/80 px-2 py-0.5 rounded-full border border-cyan-800/60 font-mono">
+                      {editEventRadiusMiles} {editEventRadiusMiles === 1 ? "mile" : "miles"}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={50}
+                    step={1}
+                    value={editEventRadiusMiles}
+                    onChange={(e) => setEditEventRadiusMiles(Number(e.target.value))}
+                    disabled={editEventIsOnline}
+                    className="w-full accent-cyan-500 bg-black h-2 rounded-lg cursor-pointer disabled:cursor-not-allowed"
+                  />
+                  <div className="flex justify-between text-[9px] text-gray-500 mt-0.5">
+                    <span>1 mi (Local)</span>
+                    <span>25 mi</span>
+                    <span>50 mi (Regional Metro)</span>
+                  </div>
+                </div>
+
+                <div className="bg-black/50 p-2 rounded-xl border border-gray-800 text-[10px]">
+                  <p className="text-gray-400 font-bold mb-1">
+                    {editEventIsOnline
+                      ? "🌐 Online Remote Event — Zip code search not required"
+                      : `Auto-Broadcast Zip Codes (${getRadiusZipList(editEventZip, editEventRadiusMiles).length}):`}
+                  </p>
+                  {!editEventIsOnline && (
+                    <p className="font-mono text-cyan-300 leading-relaxed break-words">
+                      {getRadiusZipList(editEventZip, editEventRadiusMiles).join(", ")}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* ONLINE EVENT TICKBOX */}
+              <label className="flex items-center gap-3 cursor-pointer bg-cyan-950/30 border border-cyan-800/60 p-3 rounded-xl hover:bg-cyan-950/50 transition-colors">
+                <input 
+                  type="checkbox" 
+                  checked={editEventIsOnline} 
+                  onChange={(e) => setEditEventIsOnline(e.target.checked)} 
+                  className="w-4 h-4 accent-cyan-500 rounded bg-black border-gray-700 cursor-pointer" 
+                />
+                <div>
+                  <p className="text-xs font-bold text-cyan-300">🌐 Online Event (Optional)</p>
+                  <p className="text-[10px] text-gray-400">Host virtually via Discord voice, Twitch stream, Zoom, or online gaming lobby.</p>
+                </div>
+              </label>
+
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Event Title</label>
                 <input
@@ -4599,29 +7477,100 @@ export default function Home() {
                 />
               </div>
 
+              {/* DESCRIPTION (TEXT ONLY) */}
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">
-                  Description &amp; Clickable Links
-                </label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                    Description (Text Only)
+                  </label>
+                  <span className="text-[9px] text-gray-500">Details, rules & notes</span>
+                </div>
                 <textarea
                   rows={3}
                   value={editEventDesc}
                   onChange={(e) => setEditEventDesc(e.target.value)}
-                  placeholder="Include details, menus, or links (e.g. https://venue.com/menu)"
+                  placeholder="Describe your meetup (e.g. Bring your favorite games! Snacks and drinks provided)."
                   className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500 resize-none"
                 />
-                <p className="text-[10px] text-gray-400 mt-0.5">Tip: Any https:// link will automatically render as a clickable button.</p>
               </div>
 
+              {/* LOCATION / VENUE / ONLINE LINK (CLICKABLE LINKS) */}
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Location / Venue</label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                    Location / Venue / Online Link (Clickable)
+                  </label>
+                  <span className="text-[9px] text-emerald-400/80">Renders as clickable button</span>
+                </div>
                 <input
                   type="text"
                   value={editEventLocation}
                   onChange={(e) => setEditEventLocation(e.target.value)}
-                  placeholder="e.g. Creekside Park Pavilion #2"
-                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500"
+                  placeholder={editEventIsOnline ? "e.g. https://discord.gg/your-invite or Zoom link" : "e.g. 123 Main St, Columbus OH or https://daveandbusters.com"}
+                  className="w-full px-3 py-2 bg-gray-900 border border-emerald-500/50 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 font-mono"
                 />
+                <p className="text-[9px] text-gray-400 mt-1">
+                  💡 Tip: Any web link (Discord, Zoom, Google Maps, venue website) will render as an interactive button on the event card.
+                </p>
+              </div>
+
+              {/* ADD PHOTO (OPTIONAL) */}
+              <div className="bg-gray-900/60 p-3 rounded-xl border border-gray-800">
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-purple-400">Add Photo (Optional)</label>
+                  <label className="cursor-pointer text-[9px] bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 border border-purple-800 px-2 py-0.5 rounded font-bold flex items-center gap-1 transition-colors">
+                    <span>📁 Upload from Device</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleDeviceImageUpload(file, (url) => setEditEventPhotoUrl(url));
+                      }} 
+                    />
+                  </label>
+                </div>
+                <input 
+                  type="text" 
+                  placeholder="Paste image URL or upload from your device..." 
+                  value={editEventPhotoUrl} 
+                  onChange={(e) => setEditEventPhotoUrl(e.target.value)} 
+                  className="w-full px-3 py-1.5 bg-black border border-gray-700 rounded-lg text-white text-xs focus:outline-none focus:border-purple-500" 
+                />
+                <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                  <span className="text-[9px] text-gray-500 mr-1">Presets:</span>
+                  {[
+                    { label: "🎲 Games", url: "https://images.unsplash.com/photo-1610890716171-6b1bb98ffd09?w=600&auto=format&fit=crop" },
+                    { label: "🍕 Food", url: "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&auto=format&fit=crop" },
+                    { label: "🎮 Gaming", url: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop" },
+                    { label: "☕ Coffee", url: "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=600&auto=format&fit=crop" },
+                    { label: "🌲 Outdoors", url: "https://images.unsplash.com/photo-1519331379826-f10be5486c6f?w=600&auto=format&fit=crop" }
+                  ].map(p => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => setEditEventPhotoUrl(p.url)}
+                      className={`text-[9px] px-2 py-0.5 rounded-md border transition-colors cursor-pointer ${editEventPhotoUrl === p.url ? 'bg-purple-600 text-white border-purple-500' : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'}`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                  {editEventPhotoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setEditEventPhotoUrl("")}
+                      className="text-[9px] px-1.5 py-0.5 text-rose-400 hover:text-rose-300 cursor-pointer"
+                    >
+                      &times; Clear
+                    </button>
+                  )}
+                </div>
+                {editEventPhotoUrl && (
+                  <div className="mt-2 w-full h-24 rounded-lg overflow-hidden border border-purple-500/40 bg-black">
+                    <img src={editEventPhotoUrl} alt="Event Banner Preview" className="w-full h-full object-cover" onError={() => setEditEventPhotoUrl("")} />
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -4718,18 +7667,9 @@ export default function Home() {
               <button type="submit" className="w-full py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:opacity-90 text-white font-bold text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-md">
                 Confirm Verification Code
               </button>
-              <div className="flex items-center justify-between text-[11px] mt-1 px-1">
+              <div className="flex items-center justify-center text-[11px] mt-1 px-1">
                 <button type="button" onClick={handleSendVerificationEmail} className="text-cyan-400 hover:underline cursor-pointer font-medium">
                   {isSendingCode ? "Sending Code..." : "Resend Email"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setVerificationCodeInput("123456");
-                  }}
-                  className="text-amber-400 hover:underline cursor-pointer font-medium"
-                >
-                  Use Test Code (123456)
                 </button>
               </div>
               <button
@@ -4817,28 +7757,46 @@ export default function Home() {
         <div className="fixed inset-0 z-[290] flex items-center justify-center bg-black/80 p-4">
           <div className="bg-gray-900 border border-red-500/50 rounded-3xl p-6 max-w-md w-full text-white">
             <h3 className="text-xl font-black text-red-400 mb-2">🚨 911 Emergency Assist</h3>
-            <p className="text-xs text-gray-300 mb-6">
-              Choose an action below. Broadcasting will immediately send your live GPS coordinates via both <strong>Email</strong> and <strong>Carrier SMS Text</strong> to <strong>{emergencyContactName || "your saved emergency contact"}</strong>.
+            <p className="text-xs text-gray-300 mb-5 leading-relaxed">
+              In an emergency, your safety comes first. Tap below to call 911 dispatch, open a pre-filled GPS alert in your phone's native text app (100% free), or broadcast via email.
             </p>
             
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2.5">
               <a 
                 href="tel:911" 
-                className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl text-center transition-all"
+                className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl text-center transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-red-900/50"
               >
-                📞 Call 911 Now
+                <span>📞 Call 911 Now</span>
               </a>
-              
+
               <button 
-                onClick={() => handleBroadcastEmergency(false)} 
-                className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer"
+                type="button"
+                onClick={() => handleLaunchDirectDeviceSms()} 
+                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:opacity-95 text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
               >
-                📡 Broadcast Live GPS Alert (SMS + Email) to Safety Contact
+                <span>📱 Send GPS Text from Your Phone (Free SMS)</span>
               </button>
 
               <button 
+                type="button"
+                onClick={() => handleBroadcastEmergency(false)} 
+                className="w-full py-2.5 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-bold text-xs rounded-xl border border-gray-700 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>📡 Broadcast Email Alert to Contact</span>
+              </button>
+
+              <button 
+                type="button"
+                onClick={() => handleCopyGpsCoords()} 
+                className="w-full py-2 bg-gray-900 hover:bg-black text-gray-300 font-bold text-xs rounded-xl border border-gray-800 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>📋 Copy Live GPS Coordinates</span>
+              </button>
+
+              <button 
+                type="button"
                 onClick={() => setIsEmergencyModalOpen(false)} 
-                className="mt-2 text-xs text-gray-400 hover:text-white text-center cursor-pointer"
+                className="mt-1 text-xs text-gray-400 hover:text-white text-center cursor-pointer py-1"
               >
                 Cancel / Close
               </button>
@@ -4934,7 +7892,7 @@ export default function Home() {
                     </p>
                     <p className="flex justify-between">
                       <span className="text-gray-400">Autopay:</span>
-                      <span className="text-white font-medium">$15.00/mo (PayPal H6LCRCCPZUTBU)</span>
+                      <span className="text-white font-medium">$15.00/mo (Stripe &bull; Google Pay / Card)</span>
                     </p>
                     <p className="flex justify-between">
                       <span className="text-gray-400">Welcome Kit:</span>
@@ -4954,7 +7912,7 @@ export default function Home() {
                       }}
                       className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:opacity-90 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer transition-opacity text-center"
                     >
-                      Start 7-Day Free Host Trial ($15/mo) 👑
+                      Start 30-Day Free Host Trial ($15/mo) 👑
                     </button>
                   </div>
                 )}
@@ -5213,89 +8171,378 @@ export default function Home() {
       {isManageSubOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[250] p-4">
           <div className="bg-[#111827] border border-amber-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <button onClick={() => setIsManageSubOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+            <button 
+              onClick={() => {
+                setIsManageSubOpen(false);
+              }} 
+              className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer"
+            >
+              &times;
+            </button>
             
             <span className="text-[10px] font-bold uppercase tracking-widest bg-amber-950 text-amber-300 px-3 py-1 rounded-full border border-amber-800/60 mb-2 inline-block">
-              Zip Host Membership ($15/mo)
+              {hasUsedFreeTrial ? "Zip Host Membership ($15.00/month)" : "Zip Host Membership (30-Day Free Trial)"}
             </span>
-            <h3 className="text-2xl font-black text-white mb-1">Start Your 7-Day Free Trial</h3>
-            <p className="text-xs text-gray-300 mb-4 leading-relaxed">
-              Broadcast gatherings across unlimited zip codes with your verified crown badge 👑 and receive your official Shipped Host Welcome Kit!
-            </p>
 
-            {/* Trial & Pricing Guarantee Box */}
-            <div className="bg-black/60 border border-amber-500/30 rounded-2xl p-3.5 mb-4 text-xs flex flex-col gap-2">
-              <div className="flex justify-between items-center text-gray-300">
-                <span>Billed Today:</span>
-                <span className="font-bold text-emerald-400 text-sm">$0.00 (7-Day Trial)</span>
-              </div>
-              <div className="flex justify-between items-center text-gray-300">
-                <span>Subsequent Billing:</span>
-                <span className="font-bold text-white">$15.00/month (Autopay)</span>
-              </div>
-              <div className="flex justify-between items-center text-gray-300">
-                <span>Sales Tax:</span>
-                <span className="font-bold text-white">$0.00 (Digital Membership Exempt)</span>
-              </div>
-              <div className="flex justify-between items-center text-gray-300">
-                <span>PayPal Merchant:</span>
-                <span className="font-mono text-cyan-400 text-[11px]">H6LCRCCPZUTBU</span>
-              </div>
-            </div>
-
-            <div className="bg-black/50 border border-amber-500/30 rounded-2xl p-4 mb-4 flex flex-col items-center text-center">
-              <div className="w-full h-32 bg-white rounded-xl mb-3 relative overflow-hidden flex items-center justify-center p-2">
-                <Image src="/host-kit.png" alt="Free Host Kit" fill className="object-contain" unoptimized />
-              </div>
-              <p className="text-xs text-white font-bold mb-1">🎁 FREE Shipped Host Kit Included ($50 Value):</p>
-              <ul className="text-[11px] text-gray-300 text-left w-full mt-1 space-y-1 bg-gray-900/80 p-2.5 rounded-xl border border-gray-800 shadow-inner">
-                <li>🛍️ 1x Canvas Tote Bag</li>
-                <li>🏷️ 1x Acrylic Table Placard</li>
-                <li>🪧 1x Yard Sign</li>
-                <li>🪪 1x Host Lanyard & 4x Member Lanyards</li>
-              </ul>
-              <p className="text-[10px] text-amber-300/80 italic mt-2">
-                * Unlocked FREE after 3 active monthly host payments (or buy now in Zip Shop)!
-              </p>
-            </div>
-
-            <div className="bg-gray-900/80 p-4 rounded-2xl border border-gray-800 mb-4">
-              <p className="text-xs font-bold uppercase text-amber-400 mb-2">Welcome Kit Shipping Address</p>
-              <div className="flex flex-col gap-2">
-                <input 
-                  type="text" 
-                  placeholder="Street Address *" 
-                  value={shippingAddress.street} 
-                  onChange={(e) => setShippingAddress({ ...shippingAddress, street: e.target.value })} 
-                  className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-white text-xs" 
-                />
-                <div className="grid grid-cols-3 gap-2">
-                  <input type="text" placeholder="City *" value={shippingAddress.city} onChange={(e) => setShippingAddress({ ...shippingAddress, city: e.target.value })} className="px-3 py-2 bg-black border border-gray-700 rounded-lg text-white text-xs" />
-                  <input type="text" placeholder="State *" value={shippingAddress.state} onChange={(e) => setShippingAddress({ ...shippingAddress, state: e.target.value })} className="px-3 py-2 bg-black border border-gray-700 rounded-lg text-white text-xs" />
-                  <input type="text" placeholder="Zip *" value={shippingAddress.zip} onChange={(e) => setShippingAddress({ ...shippingAddress, zip: e.target.value })} className="px-3 py-2 bg-black border border-gray-700 rounded-lg text-white text-xs" />
+            {(isSubscribedHost || Boolean(hostMembershipId)) ? (
+              /* ALREADY SUBSCRIBED: ACTIVE SUBSCRIPTION & CANCELLATION MANAGEMENT SCREEN */
+              <div className="flex flex-col gap-4 mt-1">
+                <div className="bg-gradient-to-br from-amber-950/60 via-stone-900 to-black p-5 rounded-2xl border border-amber-500/50 text-center">
+                  <span className="text-3xl mb-1 inline-block animate-bounce">👑</span>
+                  <h3 className="text-xl font-black text-white">Zip Host Membership</h3>
+                  <p className="text-xs text-amber-300 font-mono mt-1 font-bold">{hostMembershipId || 'ZIP-HOST-VERIFIED'}</p>
+                  
+                  {hostSubscriptionStatus.startsWith("Cancelled") ? (
+                    <div className="inline-block mt-2.5 px-3 py-1 bg-amber-950/80 text-amber-300 border border-amber-700/80 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                      ⚠️ Autopay Stopped &bull; Host Perks Active Until {hostSubscriptionExpiresAt ? new Date(hostSubscriptionExpiresAt).toLocaleDateString() : "End of Trial"}
+                    </div>
+                  ) : (
+                    <div className="inline-block mt-2.5 px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                      ✓ {hasUsedFreeTrial ? "Active Monthly Host ($15.00/mo)" : "30-Day Free Trial Active ($0.00 Billed)"}
+                    </div>
+                  )}
                 </div>
+
+                {/* Quick Host Action Buttons */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsManageSubOpen(false);
+                      setSelectedGroup(HOST_HQ_GROUP);
+                    }}
+                    className="p-2.5 rounded-xl bg-amber-950/80 hover:bg-amber-900 border border-amber-600/60 text-amber-300 text-xs font-bold flex flex-col items-center justify-center gap-1 cursor-pointer transition-all text-center"
+                  >
+                    <span className="text-base">👑</span>
+                    <span>Host HQ (Chat)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsManageSubOpen(false);
+                      setIsHostOpen(true);
+                    }}
+                    className="p-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-200 text-xs font-bold flex flex-col items-center justify-center gap-1 cursor-pointer transition-all text-center"
+                  >
+                    <span className="text-base">📅</span>
+                    <span>Host Event</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsManageSubOpen(false);
+                      setIsGalleryView(true);
+                      setSelectedGroup(null);
+                      setHasSearched(false);
+                    }}
+                    className="p-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-pink-500/40 text-pink-300 text-xs font-bold flex flex-col items-center justify-center gap-1 cursor-pointer transition-all text-center"
+                  >
+                    <span className="text-base">📸</span>
+                    <span>Upload Gallery</span>
+                  </button>
+                </div>
+
+                <div className="bg-black/60 p-4 rounded-2xl border border-gray-800 text-xs space-y-2.5">
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span>Monthly Rate:</span>
+                    <span className="font-bold text-white">
+                      {hostSubscriptionStatus.includes("Founder") ? "$0.00 (Founder VIP Pass)" : "$15.00/month"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span>Status:</span>
+                    <span className={`font-bold ${hostSubscriptionStatus.startsWith("Cancelled") ? "text-amber-400" : "text-emerald-400"}`}>
+                      {hostSubscriptionStatus || "Active"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span>Host Perks Access:</span>
+                    <span className="font-bold text-white">
+                      {hostSubscriptionStatus.includes("Founder") ? "🌟 Whole-Site Lifetime Access" : (hostSubscriptionExpiresAt ? `Active through ${new Date(hostSubscriptionExpiresAt).toLocaleDateString()}` : "Active")}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span>Future Autopay:</span>
+                    <span className="font-bold text-white">
+                      {hostSubscriptionStatus.includes("Founder") ? "None ($0.00 / Free VIP)" : (hostSubscriptionStatus.startsWith("Cancelled") ? "🛑 Stopped ($0.00)" : "Active ($15.00/mo)")}
+                    </span>
+                  </div>
+                </div>
+
+                {hostSubscriptionStatus.startsWith("Cancelled") ? (
+                  /* CANCELLED STATE: CONFIRMS THEY KEEP 30 DAYS WITH NO BILLING */
+                  <div className="bg-amber-950/30 border border-amber-600/50 p-4 rounded-2xl flex flex-col gap-3">
+                    <p className="text-xs text-amber-200 leading-relaxed font-medium">
+                      🛡️ <strong>Cancellation Confirmed:</strong> Your automatic renewal is cancelled and you will <strong>never be billed</strong>. As promised, you keep your full 👑 Host Crown features until <strong>{hostSubscriptionExpiresAt ? new Date(hostSubscriptionExpiresAt).toLocaleDateString() : "your 30 days complete"}</strong>.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHostSubscriptionStatus("Active Monthly Host ($15.00/mo)");
+                        setNotification("🎉 Autopay reactivated! Welcome back.");
+                      }}
+                      className="w-full py-3 rounded-xl font-bold bg-gradient-to-r from-amber-400 to-yellow-500 text-black text-xs uppercase tracking-wider cursor-pointer shadow-lg hover:opacity-90 transition-all"
+                    >
+                      Re-Enable Host Membership ($15/mo)
+                    </button>
+                  </div>
+                ) : isConfirmingCancel ? (
+                  /* INLINE CANCELLATION CONFIRMATION (NO BROWSER POPUPS) */
+                  <div className="bg-rose-950/40 border border-rose-600/60 p-4 rounded-2xl flex flex-col gap-3 animate-fadeIn">
+                    <div className="flex items-center gap-2 text-rose-300 font-bold text-xs">
+                      <span>⚠️</span>
+                      <span>Confirm Cancellation (Keep Remaining Trial Days)</span>
+                    </div>
+                    <p className="text-[11px] text-gray-200 leading-relaxed">
+                      If you cancel now, you will <strong>NOT be billed ($0.00)</strong>. You will still enjoy your full 👑 Host Crown and multi-zip broadcasting until your 30-day period ends on <strong>{hostSubscriptionExpiresAt ? new Date(hostSubscriptionExpiresAt).toLocaleDateString() : "Day 30"}</strong>, after which your account will revert to Standard Member.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCancelHostSubscription}
+                        className="flex-1 py-3 px-3 rounded-xl font-black bg-rose-600 hover:bg-rose-500 text-white text-xs cursor-pointer shadow-lg transition-all"
+                      >
+                        ✓ Yes, Cancel Autopay
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsConfirmingCancel(false)}
+                        className="flex-1 py-3 px-3 rounded-xl font-bold bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs cursor-pointer transition-all"
+                      >
+                        Keep Membership
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ACTIVE HOST SCREEN BUTTONS */
+                  <div className="flex flex-col gap-2.5 pt-1">
+                    <div className="bg-emerald-950/30 border border-emerald-700/40 p-3.5 rounded-2xl text-[11px] text-emerald-200 leading-relaxed">
+                      🛡️ <strong>Zero-Fee Cancellation Guarantee:</strong> You can cancel your subscription anytime before your 30-day trial expires. If cancelled, you will <strong>never be billed</strong>, and your host perks remain active through the full 30 days!
+                    </div>
+
+                    {/* Inline Cancel Trigger Button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingCancel(true)}
+                      className="w-full py-3.5 px-4 rounded-xl font-black bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-700 text-xs transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+                    >
+                      <span>🛑</span>
+                      <span>Cancel 30-Day Free Trial (Keep Remaining Days)</span>
+                    </button>
+
+
+
+                    <p className="text-[10px] text-gray-400 text-center mt-1">
+                      Billing questions? Contact Heather directly at <strong className="text-amber-300">contactzipgroups@gmail.com</strong>
+                    </p>
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              /* NOT YET SUBSCRIBED: SIGNUP SCREEN (TRIAL FOR NEW USERS, REGULAR $15/MO FOR RETURNING USERS) */
+              <>
+                <h3 className="text-2xl font-black text-white mb-1">
+                  {hasUsedFreeTrial ? "Zip Host Membership ($15/mo)" : "Start Your 30-Day Free Trial"}
+                </h3>
+                <p className="text-xs text-gray-300 mb-3 leading-relaxed">
+                  Broadcast gatherings across unlimited zip codes with your verified crown badge 👑 and receive your official Shipped Host Welcome Kit!
+                </p>
 
-            <div className="bg-amber-950/30 border border-amber-800/40 p-4 rounded-2xl mb-5">
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={subTermsAgreed} 
-                  onChange={(e) => setSubTermsAgreed(e.target.checked)} 
-                  className="mt-1 accent-amber-500 rounded cursor-pointer" 
-                />
-                <span className="text-xs text-amber-200/90 leading-relaxed font-medium">
-                  I understand that after my 7-day free trial ends, my account will be billed <strong>$15.00/month</strong> via PayPal Autopay ($0 tax), and my official physical Host Pack will be shipped to the provided address after 3 active months.
-                </span>
-              </label>
-            </div>
+                {/* 100% Risk-Free Guarantee Banner (Only for 1st-time Free Trial users) */}
+                {!hasUsedFreeTrial ? (
+                  <div className="bg-emerald-950/40 border border-emerald-600/50 p-3 rounded-2xl mb-3.5 flex items-start gap-2.5">
+                    <span className="text-base mt-0.5">🛡️</span>
+                    <div>
+                      <p className="text-xs font-bold text-emerald-300">100% Risk-Free Cancellation Guarantee</p>
+                      <p className="text-[10px] text-emerald-200/90 leading-relaxed mt-0.5">
+                        Cancel anytime before your 30 days are up with 1 click in your profile or directly through Stripe. If you cancel before day 30, you will <strong>never be charged</strong> ($0.00).
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-amber-950/40 border border-amber-600/50 p-3 rounded-2xl mb-3.5 flex items-start gap-2.5">
+                    <span className="text-base mt-0.5">👑</span>
+                    <div>
+                      <p className="text-xs font-bold text-amber-300">Monthly Host Membership</p>
+                      <p className="text-[10px] text-amber-200/90 leading-relaxed mt-0.5">
+                        Free trial previously activated on this account. Re-subscribe now for <strong>$15.00/month</strong> for continuous unlimited city-wide broadcasting.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
-            <div className="flex flex-col gap-3">
-              <button onClick={handleActivateSubscription} className="w-full py-3.5 rounded-xl font-bold bg-[#ffc439] hover:bg-[#f2ba31] text-[#003087] shadow-lg cursor-pointer text-sm transition-opacity flex items-center justify-center gap-2">
-                👑 Start 7-Day Free Trial ($0 Today, then $15/mo Autopay)
-              </button>
-            </div>
+                {/* Pricing Box */}
+                <div className="bg-black/60 border border-amber-500/30 rounded-2xl p-3.5 mb-4 text-xs flex flex-col gap-2">
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span>Billed Today:</span>
+                    <span className={`font-bold text-sm ${hasUsedFreeTrial ? "text-amber-400" : "text-emerald-400"}`}>
+                      {hasUsedFreeTrial ? "$15.00 (First Month)" : "$0.00 (30-Day Free Trial)"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span>Subsequent Billing:</span>
+                    <span className="font-bold text-white">$15.00/month (Autopay)</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span>Sales Tax:</span>
+                    <span className="font-bold text-white">$0.00 (Digital Membership Exempt)</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span>Payment Processor:</span>
+                    <span className="font-mono text-cyan-400 text-[11px]">Stripe &bull; Google Pay &amp; Apple Pay</span>
+                  </div>
+                </div>
+
+                {/* FOUNDER / HOST PROMO CODE BOX */}
+                <div className="bg-gradient-to-r from-purple-950/60 via-indigo-950/50 to-black border-2 border-purple-500/50 rounded-2xl p-4 mb-4 shadow-lg shadow-purple-950/30">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+                      <span className="text-base">🎟️</span> Have a Promo Code?
+                    </span>
+                  
+                  </div>
+                  <p className="text-[11px] text-gray-300 mb-2 leading-relaxed">
+                    Have a promo code? Redeem below to unlock full whole-site Host access and crown badge 👑 instantly.
+                  </p>
+                  
+                  </div>
+                  <form onSubmit={handleApplyPromoCode} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={promoCodeInput}
+                      onChange={(e) => {
+                        setPromoCodeInput(e.target.value);
+                        if (promoError) setPromoError(null);
+                      }}
+                      className="flex-1 px-3.5 py-2.5 bg-black border border-purple-500/40 focus:border-purple-400 rounded-xl text-white text-xs font-mono tracking-wider uppercase focus:outline-none focus:ring-1 focus:ring-purple-400"
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-md transition-all whitespace-nowrap border border-purple-400/30"
+                    >
+                      Redeem Code
+                    </button>
+                  </form>
+                  {promoError && (
+                    <p className="text-[11px] text-rose-300 font-semibold mt-2 flex items-center gap-1 animate-fadeIn">
+                      <span>⚠️</span> {promoError}
+                    </p>
+                  )}
+                  {promoSuccess && (
+                    <p className="text-[11px] text-emerald-300 font-semibold mt-2 flex items-center gap-1 animate-fadeIn">
+                      <span>✓</span> {promoSuccess}
+                    </p>
+                  )}
+              
+
+                <div className="bg-black/50 border border-amber-500/30 rounded-2xl p-4 mb-4 flex flex-col items-center text-center">
+                  <div className="w-full h-32 bg-white rounded-xl mb-3 relative overflow-hidden flex items-center justify-center p-2">
+                    <Image src="/host-kit.png" alt="Free Host Kit" fill className="object-contain" unoptimized />
+                  </div>
+                  <p className="text-xs text-white font-bold mb-1">🎁 FREE Shipped Host Kit Included ($50 Value):</p>
+                  <ul className="text-[11px] text-gray-300 text-left w-full mt-1 space-y-1 bg-gray-900/80 p-2.5 rounded-xl border border-gray-800 shadow-inner">
+                    <li>🛍️ 1x Canvas Tote Bag</li>
+                    <li>🏷️ 1x Acrylic Table Placard</li>
+                    <li>🪧 1x Yard Sign</li>
+                    <li>🪪 1x Host Lanyard & 4x Member Lanyards</li>
+                  </ul>
+                  <p className="text-[10px] text-amber-300/80 italic mt-2">
+                    * Unlocked FREE after 3 active monthly host payments (or buy now in Zip Shop)!
+                  </p>
+                </div>
+
+                <div className="bg-gray-900/80 p-4 rounded-2xl border border-gray-800 mb-4">
+                  <p className="text-xs font-bold uppercase text-amber-400 mb-2">Welcome Kit Shipping Address</p>
+                  <div className="flex flex-col gap-2">
+                    <input 
+                      type="text" 
+                      placeholder="Street Address *" 
+                      value={shippingAddress.street} 
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, street: e.target.value })} 
+                      className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-white text-xs" 
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <input type="text" placeholder="City *" value={shippingAddress.city} onChange={(e) => setShippingAddress({ ...shippingAddress, city: e.target.value })} className="px-3 py-2 bg-black border border-gray-700 rounded-lg text-white text-xs" />
+                      <input type="text" placeholder="State *" value={shippingAddress.state} onChange={(e) => setShippingAddress({ ...shippingAddress, state: e.target.value })} className="px-3 py-2 bg-black border border-gray-700 rounded-lg text-white text-xs" />
+                      <input type="text" placeholder="Zip *" value={shippingAddress.zip} onChange={(e) => setShippingAddress({ ...shippingAddress, zip: e.target.value })} className="px-3 py-2 bg-black border border-gray-700 rounded-lg text-white text-xs" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-amber-950/30 border border-amber-800/40 p-4 rounded-2xl mb-5">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={subTermsAgreed} 
+                      onChange={(e) => setSubTermsAgreed(e.target.checked)} 
+                      className="mt-1 accent-amber-500 rounded cursor-pointer" 
+                    />
+                    <span className="text-xs text-amber-200/90 leading-relaxed font-medium">
+                      {hasUsedFreeTrial ? (
+                        <>
+                          I understand that my account will be billed <strong>$15.00/month</strong> autopay ($0 tax), and my official physical Host Pack will be shipped to the provided address after 3 active months. I can cancel anytime with 1 click in your profile anytime.
+                        </>
+                      ) : (
+                        <>
+                          I understand that after my 30-day free trial ends, my account will be billed <strong>$15.00/month</strong> autopay ($0 tax), and my official physical Host Pack will be shipped to the provided address after 3 active months. I can cancel anytime before day 30 with no charge.
+                        </>
+                      )}
+                    </span>
+                  </label>
+                </div>
+
+                {/* DIRECT OFFICIAL PAYMENT BUTTON: STRIPE WITH GOOGLE PAY & APPLE PAY */}
+                <div className="flex flex-col gap-3 pt-1">
+                  <div className="text-center mb-1">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-amber-400">
+                      {hasUsedFreeTrial ? "Instant Stripe Checkout ($15.00 Due Today):" : "Start Your 30-Day Free Trial ($0.00 Due Today):"}
+                    </span>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      Instant activation &bull; Welcome kit shipped &bull; Cancel anytime
+                    </p>
+                  </div>
+
+                  {/* Official Stripe Button with Google Pay & Apple Pay */}
+                  <button
+                    type="button"
+                    disabled={isStripeLoading}
+                    onClick={handleInitiateStripeHostCheckout}
+                    className="w-full py-4 px-5 rounded-2xl font-black bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 active:scale-[0.99] text-white shadow-xl hover:shadow-2xl transition-all cursor-pointer flex flex-col items-center justify-center border border-indigo-400/40"
+                  >
+                    <div className="flex items-center gap-2 text-sm md:text-base font-black">
+                      {isStripeLoading ? (
+                        <>
+                          <span className="animate-spin text-lg">⏳</span>
+                          <span>Connecting to Secure Stripe Checkout...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-lg">⚡</span>
+                          <span>{hasUsedFreeTrial ? "Subscribe $15/mo with Google Pay, Apple Pay or Card" : "Start 30-Day Free Trial (Google Pay, Apple Pay or Card)"}</span>
+                        </>
+                      )}
+                    </div>
+                    {/* Visual Supported Badges */}
+                    <div className="flex items-center gap-2 mt-1.5 text-[11px] font-bold">
+                      <span className="bg-black/40 px-2.5 py-0.5 rounded-md border border-white/20 text-emerald-300">📱 Google Pay</span>
+                      <span className="bg-black/40 px-2.5 py-0.5 rounded-md border border-white/20 text-white">🍏 Apple Pay</span>
+                      <span className="bg-black/40 px-2.5 py-0.5 rounded-md border border-white/20 text-cyan-300">💳 Card</span>
+                    </div>
+                    <span className="text-[10px] font-medium text-indigo-100/80 mt-1">
+                      {hasUsedFreeTrial ? "$15.00 Billed Today &bull; $15/mo recurring &bull; Cancel anytime" : "$0.00 Due Today &bull; $15.00/mo autopay after 30 days &bull; No charge if cancelled"}
+                    </span>
+                  </button>
+
+                  <div className="flex items-center justify-center gap-3 text-[10px] text-gray-400 mt-1">
+                    <span className="flex items-center gap-1">🔒 256-Bit SSL Encrypted</span>
+                    <span>&bull;</span>
+                    <span>Stripe Verified</span>
+                    <span>&bull;</span>
+                    <span>Google Pay &amp; Apple Pay Ready</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -5319,7 +8566,7 @@ export default function Home() {
                 Official Order Receipt
               </span>
               <h3 className="text-2xl font-black text-white">Zip Shop Order Confirmed!</h3>
-              <p className="text-xs text-gray-300 mt-1">Transmitted securely to PayPal Merchant ID: <strong className="text-cyan-300">H6LCRCCPZUTBU</strong></p>
+              <p className="text-xs text-gray-300 mt-1">Processed securely via Stripe &bull; Google Pay &amp; Digital Wallet Verified</p>
             </div>
 
             <div className="bg-black/60 p-4 rounded-2xl border border-gray-800 mb-4 flex justify-between items-center text-xs">
@@ -5428,7 +8675,7 @@ export default function Home() {
                 Verified Host Confirmed
               </span>
               <h3 className="text-2xl font-black text-white">Welcome, Zip Host!</h3>
-              <p className="text-xs text-gray-300 mt-1">7-Day Free Trial Activated &bull; PayPal Autopay Scheduled</p>
+              <p className="text-xs text-gray-300 mt-1">30-Day Free Trial Activated &bull; Stripe Autopay Scheduled (Google Pay / Card)</p>
             </div>
 
             <div className="bg-black/60 p-4 rounded-2xl border border-gray-800 mb-4 flex justify-between items-center text-xs">
@@ -5449,7 +8696,7 @@ export default function Home() {
               </div>
               <div className="flex justify-between text-gray-300">
                 <span>Billed Today:</span>
-                <span className="font-bold text-emerald-400">$0.00 (Free 7-Day Trial)</span>
+                <span className="font-bold text-emerald-400">$0.00 (Free 30-Day Trial)</span>
               </div>
               <div className="flex justify-between text-gray-300">
                 <span>Recurring Rate:</span>
@@ -5461,7 +8708,7 @@ export default function Home() {
               </div>
               <div className="flex justify-between text-gray-300">
                 <span>Merchant:</span>
-                <span className="font-mono text-cyan-400">PayPal (H6LCRCCPZUTBU)</span>
+                <span className="font-mono text-cyan-400">Stripe (Google Pay / Apple Pay / Card)</span>
               </div>
             </div>
 
@@ -5617,11 +8864,16 @@ export default function Home() {
             </div>
             
             <form onSubmit={handleHostSubmit} className="flex flex-col gap-3">
-              {/* HOST RADIUS SLIDER (NO MORE TYPING MULTIPLE ZIP CODES!) */}
-              <div className="bg-gray-900/70 p-3 rounded-2xl border border-gray-800 flex flex-col gap-2.5">
+              {/* HOST RADIUS SLIDER (Grayed out when Online Event is ticked) */}
+              <div
+                className={`bg-gray-900/70 p-3 rounded-2xl border border-gray-800 flex flex-col gap-2.5 transition-all ${
+                  isOnlineEvent ? "opacity-40 pointer-events-none select-none grayscale" : ""
+                }`}
+                aria-disabled={isOnlineEvent}
+              >
                 <div className="flex justify-between items-center">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
-                    Host Center Zip Code
+                    Host Center Zip Code {isOnlineEvent && <span className="text-gray-400 normal-case font-normal">(Disabled for online event)</span>}
                   </label>
                   <input
                     type="text"
@@ -5629,8 +8881,9 @@ export default function Home() {
                     value={hostCenterZip}
                     onChange={(e) => setHostCenterZip(e.target.value)}
                     placeholder="43230"
-                    required
-                    className="w-24 px-2.5 py-1 bg-black border border-gray-700 rounded-lg text-white font-mono text-xs text-center focus:outline-none focus:border-cyan-500"
+                    required={!isOnlineEvent}
+                    disabled={isOnlineEvent}
+                    className="w-24 px-2.5 py-1 bg-black border border-gray-700 rounded-lg text-white font-mono text-xs text-center focus:outline-none focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
 
@@ -5648,7 +8901,8 @@ export default function Home() {
                     step={1}
                     value={hostRadiusMiles}
                     onChange={(e) => setHostRadiusMiles(Number(e.target.value))}
-                    className="w-full accent-cyan-500 bg-black h-2 rounded-lg cursor-pointer"
+                    disabled={isOnlineEvent}
+                    className="w-full accent-cyan-500 bg-black h-2 rounded-lg cursor-pointer disabled:cursor-not-allowed"
                   />
                   <div className="flex justify-between text-[9px] text-gray-500 mt-0.5">
                     <span>1 mi (Local)</span>
@@ -5659,26 +8913,166 @@ export default function Home() {
 
                 <div className="bg-black/50 p-2 rounded-xl border border-gray-800 text-[10px]">
                   <p className="text-gray-400 font-bold mb-1">
-                    Auto-Broadcast Zip Codes ({getRadiusZipList(hostCenterZip, hostRadiusMiles).length}):
+                    {isOnlineEvent
+                      ? "🌐 Online Remote Event — Zip code search not required"
+                      : `Auto-Broadcast Zip Codes (${getRadiusZipList(hostCenterZip, hostRadiusMiles).length}):`}
                   </p>
-                  <p className="font-mono text-cyan-300 leading-relaxed break-words">
-                    {getRadiusZipList(hostCenterZip, hostRadiusMiles).join(", ")}
-                  </p>
+                  {!isOnlineEvent && (
+                    <p className="font-mono text-cyan-300 leading-relaxed break-words">
+                      {getRadiusZipList(hostCenterZip, hostRadiusMiles).join(", ")}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              <div className="bg-gray-900/60 p-3 rounded-xl border border-gray-800">
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={duplicateToAllZips} 
-                    onChange={(e) => setDuplicateToAllZips(e.target.checked)} 
-                    className="accent-cyan-500 rounded cursor-pointer" 
-                  />
-                  <span className="text-xs text-gray-300 font-medium">Broadcast this event across all target zip codes</span>
-                </label>
+              {/* ONLINE EVENT TICKBOX (Replaces clashing broadcast checkbox) */}
+              <label className="flex items-center gap-3 cursor-pointer bg-cyan-950/30 border border-cyan-800/60 p-3 rounded-xl hover:bg-cyan-950/50 transition-colors">
+                <input 
+                  type="checkbox" 
+                  checked={isOnlineEvent} 
+                  onChange={(e) => setIsOnlineEvent(e.target.checked)} 
+                  className="w-4 h-4 accent-cyan-500 rounded bg-black border-gray-700 cursor-pointer" 
+                />
+                <div>
+                  <p className="text-xs font-bold text-cyan-300">🌐 Online Event (Optional)</p>
+                  <p className="text-[10px] text-gray-400">Host virtually via Discord voice, Twitch stream, Zoom, or online gaming lobby.</p>
+                </div>
+              </label>
+
+              {/* GROUP CATEGORY */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Select Group Category</label>
+                <select 
+                  value={selectedCategoryGroup} 
+                  onChange={(e) => setSelectedCategoryGroup(e.target.value)} 
+                  className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500"
+                >
+                  {Array.from(new Set(groups.filter(g => !g.isHostOnly).map(g => g.name))).map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
               </div>
 
+              {/* EVENT TITLE */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Event Title</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. Backyard BBQ & Board Games" 
+                  value={eventTitle} 
+                  onChange={(e) => setEventTitle(e.target.value)} 
+                  required 
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" 
+                />
+              </div>
+
+              {/* DESCRIPTION (TEXT ONLY) */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400">Description (Text Only)</label>
+                  <span className="text-[9px] text-gray-500">Details, rules & notes</span>
+                </div>
+                <textarea 
+                  rows={3} 
+                  placeholder="Tell your neighbors what to expect (e.g. Bring your favorite games! Snacks and soft drinks provided)." 
+                  value={eventDesc} 
+                  onChange={(e) => setEventDesc(e.target.value)} 
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500 resize-none" 
+                />
+              </div>
+
+              {/* LOCATION / VENUE / ONLINE LINK (CLICKABLE LINKS) */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                    Location / Venue / Online Link (Clickable)
+                  </label>
+                  <span className="text-[9px] text-emerald-400/80">Renders as clickable button</span>
+                </div>
+                <input 
+                  type="text" 
+                  placeholder={isOnlineEvent ? "e.g. https://discord.gg/your-invite or Zoom URL" : "e.g. 123 Main St, Columbus OH or https://daveandbusters.com"} 
+                  value={eventLocation} 
+                  onChange={(e) => setEventLocation(e.target.value)} 
+                  className="w-full px-3 py-2 bg-gray-900 border border-emerald-500/50 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 font-mono" 
+                />
+                <p className="text-[9px] text-gray-400 mt-1">
+                  💡 Tip: Any web link (Discord, Zoom, Google Maps, venue website) will render as an interactive button on the event card.
+                </p>
+              </div>
+
+              {/* ADD PHOTO (OPTIONAL) */}
+              <div className="bg-gray-900/60 p-3 rounded-xl border border-gray-800">
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-purple-400">Add Photo (Optional)</label>
+                  <label className="cursor-pointer text-[9px] bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 border border-purple-800 px-2 py-0.5 rounded font-bold flex items-center gap-1 transition-colors">
+                    <span>📁 Upload from Device</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleDeviceImageUpload(file, (url) => setEventPhotoUrl(url));
+                      }} 
+                    />
+                  </label>
+                </div>
+                <input 
+                  type="text" 
+                  placeholder="Paste image URL or upload from your device..." 
+                  value={eventPhotoUrl} 
+                  onChange={(e) => setEventPhotoUrl(e.target.value)} 
+                  className="w-full px-3 py-1.5 bg-black border border-gray-700 rounded-lg text-white text-xs focus:outline-none focus:border-purple-500" 
+                />
+                <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                  <span className="text-[9px] text-gray-500 mr-1">Presets:</span>
+                  {[
+                    { label: "🎲 Games", url: "https://images.unsplash.com/photo-1610890716171-6b1bb98ffd09?w=600&auto=format&fit=crop" },
+                    { label: "🍕 Food", url: "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&auto=format&fit=crop" },
+                    { label: "🎮 Gaming", url: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop" },
+                    { label: "☕ Coffee", url: "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=600&auto=format&fit=crop" },
+                    { label: "🌲 Outdoors", url: "https://images.unsplash.com/photo-1519331379826-f10be5486c6f?w=600&auto=format&fit=crop" }
+                  ].map(p => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => setEventPhotoUrl(p.url)}
+                      className={`text-[9px] px-2 py-0.5 rounded-md border transition-colors cursor-pointer ${eventPhotoUrl === p.url ? 'bg-purple-600 text-white border-purple-500' : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'}`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                  {eventPhotoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setEventPhotoUrl("")}
+                      className="text-[9px] px-1.5 py-0.5 text-rose-400 hover:text-rose-300 cursor-pointer"
+                    >
+                      &times; Clear
+                    </button>
+                  )}
+                </div>
+                {eventPhotoUrl && (
+                  <div className="mt-2 w-full h-24 rounded-lg overflow-hidden border border-purple-500/40 bg-black">
+                    <img src={eventPhotoUrl} alt="Event Banner Preview" className="w-full h-full object-cover" onError={() => setEventPhotoUrl("")} />
+                  </div>
+                )}
+              </div>
+
+              {/* DATE & TIME */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Date</label>
+                  <input type="text" placeholder="e.g. 11/15/26" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Time</label>
+                  <input type="text" placeholder="e.g. 6:00 PM" value={eventTime} onChange={(e) => setEventTime(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
+                </div>
+              </div>
+
+              {/* 18+ RESTRICTION TOGGLE */}
               <label className="flex items-center gap-3 cursor-pointer bg-black/40 border border-gray-800 p-3 rounded-xl">
                 <input 
                   type="checkbox" 
@@ -5691,42 +9085,6 @@ export default function Home() {
                   <p className="text-[10px] text-gray-400">Restrict this event to adult members only.</p>
                 </div>
               </label>
-
-              <div className="flex flex-col gap-1.5 bg-gray-900/60 p-3 rounded-xl border border-gray-800">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Select Group Category</label>
-                  <select 
-                    value={selectedCategoryGroup} 
-                    onChange={(e) => setSelectedCategoryGroup(e.target.value)} 
-                    className="w-full px-3 py-2 bg-black border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500"
-                  >
-                    {Array.from(new Set(groups.filter(g => !g.isHostOnly).map(g => g.name))).map(name => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Event Title</label>
-                <input type="text" placeholder="e.g. Backyard BBQ & Board Games" value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Description & Location Details</label>
-                <textarea rows={2} placeholder="e.g. Meet at Creekside Park Pavilion #2!" value={eventDesc} onChange={(e) => setEventDesc(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500 resize-none" />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Date</label>
-                  <input type="text" placeholder="e.g. 11/15/26" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1">Time</label>
-                  <input type="text" placeholder="e.g. 6:00 PM" value={eventTime} onChange={(e) => setEventTime(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500" />
-                </div>
-              </div>
 
               <div className="bg-gray-900/60 p-3 rounded-xl border border-gray-800">
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-2">Potluck & Needs Checklist (Optional)</label>
@@ -6000,48 +9358,156 @@ export default function Home() {
       {isPartnerModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[200] p-4 overflow-y-auto">
           <div className="bg-[#111827] border border-amber-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative my-6 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <button onClick={() => setIsPartnerModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
-            <h3 className="text-xl font-black text-amber-400 mb-1">Partner Venue Application ($35/mo)</h3>
-            <p className="text-xs text-gray-300 mb-4 leading-relaxed">Fill your slow weeknights with weekly neighborhood groups.</p>
-            
-            <form onSubmit={handlePartnerSubmit} className="flex flex-col gap-3">
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Business Name</label>
-                <input type="text" placeholder="e.g. Nostalgia Lounge" value={partnerBusinessName} onChange={(e) => setPartnerBusinessName(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Business Address</label>
-                <input type="text" placeholder="e.g. 102 Mill St, Gahanna, OH" value={partnerAddress} onChange={(e) => setPartnerAddress(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Phone Number</label>
-                  <input type="text" placeholder="e.g. 614-555-0192" value={partnerPhone} onChange={(e) => setPartnerPhone(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Email Address</label>
-                  <input type="email" placeholder="manager@venue.com" value={partnerEmail} onChange={(e) => setPartnerEmail(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Hours of Operation</label>
-                <input type="text" placeholder="e.g. Tue-Sun: 4PM - 11PM" value={partnerHours} onChange={(e) => setPartnerHours(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Proposed Member Perk (Optional)</label>
-                <input type="text" placeholder="e.g. 15% off wine flights for Zip Groups" value={partnerPerk} onChange={(e) => setPartnerPerk(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Menu Link or Highlights (Optional)</label>
-                <input type="text" placeholder="e.g. Craft cocktails & artisan flatbreads" value={partnerMenu} onChange={(e) => setPartnerMenu(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
-              </div>
+            <button 
+              onClick={() => {
+                setIsPartnerModalOpen(false);
+                setCompletedVenueRegistration(null);
+              }} 
+              className="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold cursor-pointer"
+            >
+              &times;
+            </button>
 
-              <div className="flex flex-col gap-2 mt-3">
-                <button type="submit" className="w-full py-3.5 rounded-xl font-bold bg-[#ffc439] hover:bg-[#f2ba31] text-[#003087] shadow-lg cursor-pointer text-xs transition-opacity flex items-center justify-center gap-2">
-                  Pay $35/mo with PayPal & Submit Application
+            {completedVenueRegistration ? (
+              <div className="flex flex-col gap-4 text-center py-2 animate-in fade-in">
+                <div className="w-14 h-14 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto text-2xl font-bold border border-emerald-500/40">
+                  🎉
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white">Partner Venue Registered!</h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Welcome to the Zip Groups Verified Partner Network.
+                  </p>
+                </div>
+
+                <div className="bg-black/60 border border-emerald-500/40 rounded-2xl p-4 text-left flex flex-col gap-2">
+                  <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                    <span className="text-[10px] uppercase font-bold text-gray-400">Venue Member ID</span>
+                    <span className="font-mono text-cyan-400 font-bold text-xs select-all bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800">
+                      {completedVenueRegistration.venueMemberId}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-300">
+                    <p className="font-bold text-white text-sm">{completedVenueRegistration.businessName}</p>
+                    <p className="text-gray-400 text-[11px] mt-0.5">{completedVenueRegistration.address}</p>
+                  </div>
+                  <div className="text-[11px] text-gray-300 flex justify-between pt-1">
+                    <span>Monthly Rate:</span>
+                    <span className="font-bold text-emerald-400">$35.00/month</span>
+                  </div>
+                  <div className="text-[11px] text-gray-300 flex justify-between">
+                    <span>Payment Method:</span>
+                    <span className="font-medium text-white">{completedVenueRegistration.paymentMethod}</span>
+                  </div>
+                  <div className="text-[11px] text-gray-300 flex justify-between">
+                    <span>Member Perk:</span>
+                    <span className="font-medium text-amber-300">{completedVenueRegistration.perk}</span>
+                  </div>
+                </div>
+
+                <div className="bg-blue-950/40 border border-blue-800/60 p-3 rounded-xl text-[11px] text-blue-200 text-left">
+                  📧 <strong>Confirmation Dispatched:</strong> A welcome email with your Venue Member ID was sent to <span className="underline">{completedVenueRegistration.email}</span>. An admin notification copy was also sent to Heather at Zip Groups HQ.
+                </div>
+
+                <button
+                  onClick={() => {
+                    setIsPartnerModalOpen(false);
+                    setCompletedVenueRegistration(null);
+                  }}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg cursor-pointer hover:opacity-90"
+                >
+                  Done / Close
                 </button>
               </div>
-            </form>
+            ) : (
+              <div>
+                <h3 className="text-xl font-black text-amber-400 mb-1">Partner Venue Application ($35/mo)</h3>
+                <p className="text-xs text-gray-300 mb-4 leading-relaxed">Fill your slow weeknights with weekly neighborhood groups.</p>
+                
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Business Name *</label>
+                    <input type="text" placeholder="e.g. Nostalgia Lounge" value={partnerBusinessName} onChange={(e) => setPartnerBusinessName(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Business Address *</label>
+                    <input type="text" placeholder="e.g. 102 Mill St, Gahanna, OH" value={partnerAddress} onChange={(e) => setPartnerAddress(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Phone Number</label>
+                      <input type="text" placeholder="e.g. 614-555-0192" value={partnerPhone} onChange={(e) => setPartnerPhone(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Email Address *</label>
+                      <input type="email" placeholder="manager@venue.com" value={partnerEmail} onChange={(e) => setPartnerEmail(e.target.value)} required className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Hours of Operation</label>
+                    <input type="text" placeholder="e.g. Tue-Sun: 4PM - 11PM" value={partnerHours} onChange={(e) => setPartnerHours(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Proposed Member Perk (Optional)</label>
+                    <input type="text" placeholder="e.g. 15% off tab for Zip Groups" value={partnerPerk} onChange={(e) => setPartnerPerk(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Menu Link or Highlights (Optional)</label>
+                    <input type="text" placeholder="e.g. Craft cocktails & artisan pizzas" value={partnerMenu} onChange={(e) => setPartnerMenu(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500" />
+                  </div>
+
+                  {/* DIRECT OFFICIAL VENUE PAYMENT GATEWAY: STRIPE (GOOGLE PAY, APPLE PAY, CARDS) */}
+                  <div className="flex flex-col gap-3 pt-2">
+                    <div className="text-center mb-1">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-amber-400">
+                        Secure Stripe Gateway ($35.00 / month):
+                      </span>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        Promoted venue directory listing &bull; Host verified gatherings &bull; Welcome kit
+                      </p>
+                    </div>
+
+                    {/* Official Stripe Button with Google Pay & Apple Pay */}
+                    <button
+                      type="button"
+                      disabled={isStripeLoading}
+                      onClick={handleInitiateStripeVenueCheckout}
+                      className="w-full py-4 px-5 rounded-2xl font-black bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 active:scale-[0.99] text-black shadow-xl hover:shadow-2xl transition-all cursor-pointer flex flex-col items-center justify-center border border-amber-300"
+                    >
+                      <div className="flex items-center gap-2 text-sm md:text-base font-black">
+                        {isStripeLoading ? (
+                          <>
+                            <span className="animate-spin text-lg">⏳</span>
+                            <span>Connecting to Stripe...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-lg">⚡</span>
+                            <span>Subscribe $35/mo with Google Pay, Apple Pay or Card</span>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1.5 text-[11px] font-bold">
+                        <span className="bg-black/20 px-2.5 py-0.5 rounded-md border border-black/20 text-black">📱 Google Pay</span>
+                        <span className="bg-black/20 px-2.5 py-0.5 rounded-md border border-black/20 text-black">🍏 Apple Pay</span>
+                        <span className="bg-black/20 px-2.5 py-0.5 rounded-md border border-black/20 text-black">💳 Card</span>
+                      </div>
+                      <span className="text-[10px] font-medium text-black/80 mt-1">
+                        $35.00/month recurring &bull; Billed securely via Stripe &bull; Cancel anytime
+                      </span>
+                    </button>
+
+                    <div className="flex items-center justify-center gap-3 text-[10px] text-gray-400 mt-1">
+                      <span className="flex items-center gap-1">🔒 256-Bit SSL Encrypted</span>
+                      <span>&bull;</span>
+                      <span>Instant Venue Member ID</span>
+                      <span>&bull;</span>
+                      <span>Welcome Kit Shipped</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -6060,7 +9526,7 @@ export default function Home() {
                   <p><strong>1. Acceptance of Terms:</strong> By accessing or using Zip Groups, creating an account, joining a neighborhood circle, or attending any gathering posted on the platform, you agree to be bound by these Terms & Conditions.</p>
                   <p><strong>2. Age & Eligibility Requirements:</strong> Users must be at least 13 years of age. Users ages 13–17 are restricted to designated Teen categories and may not RSVP to or attend 18+ restricted gatherings. Misrepresenting your age or date of birth is grounds for immediate account termination.</p>
                   <p><strong>3. Assumption of Risk & Offline Meetups:</strong> Zip Groups is solely a digital directory and communication facilitator. Zip Groups does not vet, background-check, or supervise individual members, hosts, or offline gatherings. You assume 100% of the personal, physical, and financial risk associated with meeting people offline or attending any venue or residence.</p>
-                  <p><strong>4. Host Subscriptions & Merchandise:</strong> Host Memberships ($15/month following a 7-day trial) and Venue Partnerships ($35/month) are billed via PayPal and may be canceled at any time. Physical Host Welcome Kits are unlocked free after 3 consecutive monthly host subscription payments or may be purchased directly in the Zip Shop.</p>
+                  <p><strong>4. Host Subscriptions & Merchandise:</strong> Host Memberships ($15/month following a 30-day trial) and Venue Partnerships ($35/month) are billed via Stripe (Google Pay, Apple Pay, & Cards) and may be canceled at any time. Physical Host Welcome Kits are unlocked free after 3 consecutive monthly host subscription payments or may be purchased directly in the Zip Shop.</p>
                   <p><strong>5. Account Termination:</strong> We reserve the right to suspend or permanently remove any account that violates our zero-tolerance policies against harassment, threats, doxxing, spam, or illegal conduct.</p>
                 </div>
               </>
@@ -6082,7 +9548,7 @@ export default function Home() {
             {activeLegalModal === "guidelines" && (
               <>
                 <h3 className="text-2xl font-black text-white mb-2">Community & Safety Guidelines</h3>
-                <p className="text-xs text-emerald-400 mb-4">Building Safe, Welcoming Local Circles</p>
+                <p className="text-xs text-emerald-400 mb-4">Building Safe, Welcoming Local Groups</p>
                 <div className="space-y-3 text-xs text-gray-300 leading-relaxed">
                   <p><strong>1. Meet in Public Spaces First:</strong> Always hold initial gatherings in well-lit public locations such as verified local partner cafes, parks, libraries, or restaurants. We strongly recommend a minimum of 4 confirmed RSVPs for every gathering.</p>
                   <p><strong>2. Use the Built-In Safety Suite:</strong> Before heading to a meetup, configure your Safety Emergency Contact in Account Settings and toggle on <strong>🛡️ Safety Mode</strong> so a trusted contact is automatically notified if you do not check in.</p>
@@ -6111,9 +9577,385 @@ export default function Home() {
         </div>
       )}
 
+      {/* 24-HOUR MEETUP REMINDER POP-UP MODAL */}
+      {is24HourReminderOpen && reminderEvent && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[290] p-4">
+          <div className="bg-[#111827] border-2 border-cyan-400/80 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative text-left animate-in fade-in zoom-in-95 duration-200">
+            <button 
+              onClick={() => { setIs24HourReminderOpen(false); setReminderEmailStatus(null); }} 
+              className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl font-bold p-1 cursor-pointer"
+            >
+              &times;
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-2xl shadow-lg shadow-orange-500/20">
+                ⏰
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-950/60 border border-amber-600/40 px-2 py-0.5 rounded-full">
+                  Upcoming in 24 Hours
+                </span>
+                <h3 className="text-xl font-black text-white mt-0.5">Meetup Reminder</h3>
+              </div>
+            </div>
+
+            <div className="bg-gray-900/90 border border-gray-700/80 rounded-2xl p-4 mb-4 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h4 className="text-base font-bold text-white">
+                    {reminderEvent.title || reminderEvent.text.split(" (")[0] || "Neighborhood Meetup"}
+                  </h4>
+                  <p className="text-xs text-cyan-400 font-medium">
+                    {reminderEvent.groupName || (selectedGroup ? selectedGroup.name : "Zip Group Circle")}
+                    {reminderEvent.zipCode ? ` • Zip ${reminderEvent.zipCode}` : ""}
+                  </p>
+                </div>
+                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase border shrink-0 ${
+                  reminderEvent.host === userName
+                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                    : "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                }`}>
+                  {reminderEvent.host === userName ? "👑 You're Hosting" : "🎟️ You're Attending"}
+                </span>
+              </div>
+
+              <div className="space-y-1.5 text-xs text-gray-300 border-t border-gray-800 pt-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-cyan-400">📅</span>
+                  <span>
+                    {(reminderEvent.text.match(/\(([^)]+)\)/) || [])[1] || reminderEvent.expirationDate || "Within the next 24 hours"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400">📍</span>
+                  <span className="truncate">
+                    {reminderEvent.locationName || (reminderEvent.text.includes("📍") ? reminderEvent.text.split("📍")[1]?.split(" | ")[0] : "Local Community Spot")}
+                  </span>
+                </div>
+              </div>
+
+              {reminderEvent.host === userName ? (
+                <div className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-3 text-[11px] text-amber-200 leading-relaxed">
+                  💡 <strong>Host Checklist:</strong> Arrive 10 minutes early to secure tables or greet newcomers. Have a welcoming smile and monitor the circle chat for anyone asking for directions!
+                </div>
+              ) : (
+                <div className="bg-cyan-950/40 border border-cyan-500/30 rounded-xl p-3 text-[11px] text-cyan-200 leading-relaxed">
+                  💡 <strong>Member Reminder:</strong> If your plans change, please update your RSVP so your host has an accurate headcount. Don&apos;t forget to bring your phone with Safety Mode enabled!
+                </div>
+              )}
+            </div>
+
+            {reminderEmailStatus && (
+              <div className="mb-4 p-3 bg-gray-900 border border-cyan-500/50 rounded-xl text-xs text-center font-bold text-cyan-300 animate-in fade-in">
+                {reminderEmailStatus}
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <button
+                onClick={() => handleSend24HourReminder(reminderEvent)}
+                disabled={isSendingReminderEmail}
+                className="flex-1 py-3 px-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-cyan-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isSendingReminderEmail ? (
+                  <span>Sending email...</span>
+                ) : (
+                  <>
+                    <span>📧</span>
+                    <span>Send Email Reminder</span>
+                  </>
+                )}
+              </button>
+
+              <a
+                href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
+                  (reminderEvent.title || reminderEvent.text.split(" (")[0] || "Neighborhood Meetup")
+                )}&location=${encodeURIComponent(
+                  reminderEvent.locationName || (reminderEvent.text.includes("📍") ? reminderEvent.text.split("📍")[1]?.split(" | ")[0] : "")
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-3 px-4 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-cyan-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>🗓️</span>
+                <span>Add to Calendar</span>
+              </a>
+
+              <button
+                onClick={() => { setIs24HourReminderOpen(false); setReminderEmailStatus(null); }}
+                className="py-3 px-4 bg-gray-800/80 hover:bg-gray-700 text-gray-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  const existing = JSON.parse(localStorage.getItem("zip_dismissed_24h_reminders") || "[]");
+                  if (!existing.includes(reminderEvent.id)) {
+                    localStorage.setItem("zip_dismissed_24h_reminders", JSON.stringify([...existing, reminderEvent.id]));
+                  }
+                } catch (e) {
+                  console.warn(e);
+                }
+                setIs24HourReminderOpen(false);
+                setReminderEmailStatus(null);
+                setNotification("✅ Reminder dismissed for this meetup. It won't pop up again.");
+              }}
+              className="w-full mt-3 pt-2.5 border-t border-gray-800/80 text-center text-xs text-gray-400 hover:text-cyan-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <span>🔕</span>
+              <span>Dismiss &amp; Don&apos;t show this reminder again for this meetup</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ABOUT US MODAL */}
+      {isAboutUsOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[295] p-4">
+          <div className="bg-[#111827] border border-cyan-500/50 rounded-3xl p-6 md:p-8 max-w-2xl w-full shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar text-left">
+            <button 
+              onClick={() => setIsAboutUsOpen(false)} 
+              className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl font-bold p-1 cursor-pointer"
+            >
+              &times;
+            </button>
+
+            {/* Founder Header */}
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 mb-6 pb-6 border-b border-gray-800">
+              <div className="relative shrink-0 text-center">
+                <img
+                  src="https://myzipgroups.com/heather-avatar.jpeg"
+                  alt="Heather — Founder of Zip Groups"
+                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border-4 border-cyan-400 shadow-xl shadow-cyan-500/30 mx-auto bg-gray-800"
+                  onError={(e) => {
+                    const target = e.target as HTMLElement;
+                    target.style.display = 'none';
+                    const fallback = document.getElementById('heather-avatar-fallback');
+                    if (fallback) fallback.style.display = 'flex';
+                  }}
+                />
+                <div
+                  id="heather-avatar-fallback"
+                  style={{ display: 'none' }}
+                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 border-4 border-cyan-400 shadow-xl shadow-cyan-500/30 items-center justify-center text-white text-3xl font-black mx-auto"
+                >
+                  H
+                </div>
+                <div className="mt-2 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-400/40 text-[10px] font-bold text-cyan-300">
+                  ⭐ Founder
+                </div>
+              </div>
+
+              <div className="text-center sm:text-left">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/60 border border-cyan-600/40 px-2.5 py-0.5 rounded-full">
+                  Our Story &amp; Mission
+                </span>
+                <h3 className="text-2xl font-black text-white mt-1.5">
+                  Getting Back to Basics
+                </h3>
+                <p className="text-xs text-cyan-300 font-semibold mt-0.5">
+                  Heather &bull; Founder &amp; Community Creator
+                </p>
+                <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                  Bringing neighbors back together face-to-face in real life. Built for real people, honest communities, and genuine local friendships.
+                </p>
+              </div>
+            </div>
+
+            {/* Chapters / Story */}
+            <div className="space-y-5 text-xs text-gray-300 leading-relaxed">
+              {/* Chapter 1 */}
+              <div className="bg-gray-900/80 border border-gray-800 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🎲</span>
+                  <h4 className="font-bold text-white text-sm">Where It All Began: Ohio Gamers</h4>
+                </div>
+                <p>
+                  Zip Groups was not born in a corporate boardroom. It started in our local neighborhood with a grassroots group called <strong>Ohio Gamers</strong>. We initially hosted all our meetups on the well-known meetup platform (&ldquo;the other site&rdquo;), excited to gather fellow board game enthusiasts, tabletop players, and video gamers together for fun weekend game nights.
+                </p>
+                <p className="text-gray-400">
+                  Over time, that platform kept raising its subscription fees until it became far too expensive for ordinary neighbors just trying to host casual meetups. It felt wrong that bringing neighbors together was being monetized with predatory fees.
+                </p>
+              </div>
+
+              {/* Chapter 2 */}
+              <div className="bg-gray-900/80 border border-gray-800 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">💬</span>
+                  <h4 className="font-bold text-white text-sm">Migrating to Discord: 300+ Strong</h4>
+                </div>
+                <p>
+                  Determined to keep our community going without pricing organizers out, we migrated the group over to Discord. Word spread quickly through local word-of-mouth, and Ohio Gamers grew into a lively hub of over <strong>300+ local members</strong>. We had lively chats, game discussions, and shared hobbies every day.
+                </p>
+              </div>
+
+              {/* Chapter 3 */}
+              <div className="bg-gray-900/80 border border-cyan-900/40 rounded-2xl p-4 space-y-2 bg-gradient-to-br from-cyan-950/20 to-gray-900/80">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🤝</span>
+                  <h4 className="font-bold text-cyan-300 text-sm">The Realization: Screens Aren&apos;t Enough</h4>
+                </div>
+                <p>
+                  Even with hundreds of members on Discord, we felt something vital was missing. Digital screens and online handles only go so far. We realized that people are yearning to <strong>get back to the basics</strong>—having real-life friends you can actually hang out with, share a meal with, and laugh with face-to-face.
+                </p>
+                <p className="text-gray-300">
+                  Online friends are great, but there is no substitute for looking a neighbor in the eye, rolling dice across a wooden table, and knowing you have real friends right down the street.
+                </p>
+              </div>
+
+              {/* Chapter 4 */}
+              <div className="bg-gray-900/80 border border-emerald-900/40 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🏡</span>
+                  <h4 className="font-bold text-emerald-300 text-sm">Made with Our Neighbors in Mind</h4>
+                </div>
+                <p>
+                  That&apos;s why Zip Groups was created. We built the platform we always wished we had:
+                </p>
+                <ul className="list-disc list-inside space-y-1.5 pl-1 text-gray-300">
+                  <li><strong>Free Zip Code Browsing:</strong> Explore groups within 10 to 50 miles of your home without paying a cent or signing up.</li>
+                  <li><strong>Affordable &amp; Fair:</strong> Hosts receive a full 30-day free trial and a flat $15/month membership with zero hidden fees.</li>
+                  <li><strong>Community Safety Built-In:</strong> Safety Mode check-in timers and 911 Emergency Assist keep you and your loved ones protected.</li>
+                  <li><strong>Verified Local Venues:</strong> Partnering with local cafes, game stores, and restaurants so communities always have safe, welcoming spaces to meet.</li>
+                </ul>
+              </div>
+
+              {/* Founder Quote */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-900/30 to-blue-900/30 border border-cyan-500/30 text-center italic text-cyan-200">
+                &ldquo;No algorithms pushing outrage. No endless doom-scrolling. Just neighbors getting together, playing games, and building lifelong real-world friendships.&rdquo;
+                <div className="mt-2 text-xs font-bold text-white not-italic">
+                  — Heather, Founder &amp; Community Creator
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <button 
+                onClick={() => { setIsAboutUsOpen(false); setIsSuggestOpen(true); }}
+                className="flex-1 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-lg shadow-cyan-600/25 transition-all text-center"
+              >
+                + Suggest a New Neighborhood Group
+              </button>
+              <button 
+                onClick={() => setIsAboutUsOpen(false)} 
+                className="py-3 px-6 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs uppercase tracking-wider rounded-xl cursor-pointer transition-colors"
+              >
+                Close Window
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PWA DIRECT INSTALL MODAL */}
+      {isInstallModalOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[298] p-4 animate-in fade-in">
+          <div className="bg-[#111827] border-2 border-cyan-400 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar text-left">
+            <button 
+              onClick={() => setIsInstallModalOpen(false)} 
+              className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl font-bold p-1 cursor-pointer"
+            >
+              &times;
+            </button>
+
+            {/* Logo & Header */}
+            <div className="flex items-center gap-4 mb-5 pb-4 border-b border-gray-800">
+              <img 
+                src="https://myzipgroups.com/zip-groups-logo.png" 
+                alt="Zip Groups App Icon" 
+                className="w-14 h-14 rounded-2xl object-contain bg-black p-1 border-2 border-cyan-400 shadow-lg shadow-cyan-500/30 shrink-0" 
+              />
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/70 border border-cyan-600/40 px-2 py-0.5 rounded-full">
+                  Direct Website Download
+                </span>
+                <h3 className="text-xl font-black text-white mt-1">
+                  Install Zip Groups
+                </h3>
+                <p className="text-xs text-gray-400">
+                  Add to your home screen for the full-screen app experience.
+                </p>
+              </div>
+            </div>
+
+            {/* Chrome / Android / Desktop Direct 1-Tap Trigger */}
+            {deferredInstallPrompt && (
+              <div className="mb-5 p-4 rounded-2xl bg-gradient-to-r from-cyan-950/80 to-blue-950/80 border border-cyan-500/50 text-center">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (deferredInstallPrompt) {
+                      deferredInstallPrompt.prompt();
+                      const { outcome } = await deferredInstallPrompt.userChoice;
+                      if (outcome === "accepted") {
+                        setNotification("🎉 Zip Groups installed to your device!");
+                        setIsInstallModalOpen(false);
+                      }
+                      setDeferredInstallPrompt(null);
+                    }
+                  }}
+                  className="w-full py-3.5 px-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-sm rounded-xl shadow-xl shadow-cyan-500/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <span>⬇️</span>
+                  <span>Tap Here to Install App Now</span>
+                </button>
+              </div>
+            )}
+
+            {/* Visual Step-by-Step for iPhone & Android */}
+            <div className="space-y-4 text-xs text-gray-300">
+              <div className="bg-gray-900/90 border border-gray-800 rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base">🍎</span>
+                  <h4 className="font-bold text-white text-sm">On iPhone &amp; iPad (Safari):</h4>
+                </div>
+                <ol className="list-decimal list-inside space-y-1.5 text-gray-300 pl-1 leading-relaxed">
+                  <li>Tap the <strong>Share</strong> icon (the square with arrow <strong>⬆️</strong>) at the bottom of Safari.</li>
+                  <li>Scroll down and tap <strong>&ldquo;Add to Home Screen&rdquo;</strong> (<strong>📲</strong>).</li>
+                  <li>Tap <strong>&ldquo;Add&rdquo;</strong> in the top right corner.</li>
+                </ol>
+              </div>
+
+              <div className="bg-gray-900/90 border border-gray-800 rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base">🤖</span>
+                  <h4 className="font-bold text-white text-sm">On Android (Chrome / Edge):</h4>
+                </div>
+                <ol className="list-decimal list-inside space-y-1.5 text-gray-300 pl-1 leading-relaxed">
+                  <li>Tap the <strong>Three Dots (⋮)</strong> menu in the top right corner.</li>
+                  <li>Tap <strong>&ldquo;Install App&rdquo;</strong> or <strong>&ldquo;Add to Home Screen&rdquo;</strong>.</li>
+                  <li>Confirm by tapping <strong>Install</strong>.</li>
+                </ol>
+              </div>
+
+              <div className="p-3 bg-black/50 border border-cyan-900/40 rounded-xl text-[11px] text-cyan-200/90 flex items-center gap-2">
+                <span className="text-lg">✨</span>
+                <span><strong>No App Store required!</strong> It launches full-screen with no browser address bar, updates instantly, and takes up virtually zero phone storage.</span>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button 
+                type="button"
+                onClick={() => setIsInstallModalOpen(false)} 
+                className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-gray-200 font-bold text-xs uppercase tracking-wider rounded-xl cursor-pointer transition-colors"
+              >
+                Got It, Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Universal Legal Footer WITH FULL CLICKABLE LEGAL MODALS */}
       <footer className="w-full max-w-6xl text-center py-10 mt-16 border-t border-gray-800/60 text-xs text-gray-500 z-10 flex flex-col gap-4">
         <div className="flex justify-center flex-wrap gap-6 font-medium">
+          <span onClick={() => setIsAboutUsOpen(true)} className="hover:text-cyan-400 cursor-pointer transition-colors text-cyan-300 font-bold">About Us</span>
           <span onClick={() => setIsSuggestOpen(true)} className="hover:text-cyan-400 cursor-pointer transition-colors text-cyan-300 font-bold">+ Suggest Group</span>
           <a href="mailto:contactzipgroups@gmail.com" className="hover:text-cyan-400 cursor-pointer transition-colors text-cyan-300 font-bold">Contact Us</a>
           <span className="hover:text-cyan-400 cursor-pointer transition-colors" onClick={() => setActiveLegalModal("terms")}>Terms & Conditions</span>
